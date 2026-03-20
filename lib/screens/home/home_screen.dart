@@ -197,6 +197,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         SnackBar(content: Text('Pairing failed: $reason')),
       );
     };
+
+    // Mobile web client PIN callback.
+    appService.onWebPinGenerated = (clientIp, clientName, pin) {
+      _showMobilePinDialog(clientIp, clientName, pin);
+    };
   }
 
   void _showConnectDialog(BuildContext context) {
@@ -246,6 +251,56 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         onCancel: () {
           Navigator.of(context).pop();
         },
+      ),
+    );
+  }
+
+  void _showMobilePinDialog(String clientIp, String clientName, String pin) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Mobile PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.phone_android, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              '$clientName ($clientIp)',
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text('Share this PIN with the mobile device:'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText(
+                pin.split('').join(' '),
+                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 4,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Enter this PIN on the mobile browser to authenticate.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

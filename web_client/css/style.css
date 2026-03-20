@@ -296,3 +296,95 @@ h2 {
 .toast.show {
   opacity: 1;
 }
+
+/* PIN Auth Overlay */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.overlay.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.overlay-content {
+  text-align: center;
+  padding: 32px 24px;
+  max-width: 340px;
+  width: 100%;
+}
+
+.overlay-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.overlay-content h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-bottom: 8px;
+}
+
+.overlay-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.pin-input-group {
+  margin-bottom: 12px;
+}
+
+.pin-input-group input {
+  width: 100%;
+  padding: 16px;
+  text-align: center;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 12px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.pin-input-group input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.pin-error {
+  color: var(--danger) !important;
+  font-size: 13px !important;
+  min-height: 20px;
+}
+
+.pin-hint {
+  font-size: 12px !important;
+  color: var(--text-secondary) !important;
+  margin-top: 24px !important;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+.shake {
+  animation: shake 0.4s ease;
+}

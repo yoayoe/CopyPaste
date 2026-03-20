@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'package:cryptography/cryptography.dart';
 import '../../utils/logger.dart';
 
 const _tag = 'WebServer';
@@ -10,8 +12,16 @@ class WebClientInfo {
   final WebSocket socket;
   final String ip;
   String name;
+  bool authenticated;
+  String? _pin;
+  String? _nonce;
 
-  WebClientInfo({required this.socket, required this.ip, this.name = 'Mobile Browser'});
+  WebClientInfo({
+    required this.socket,
+    required this.ip,
+    this.name = 'Mobile Browser',
+    this.authenticated = false,
+  });
 }
 
 /// Embedded HTTP server that serves the web client SPA and handles API routes.
@@ -25,11 +35,19 @@ class EmbeddedWebServer {
   /// Called when a web client connects or disconnects.
   void Function(List<WebClientInfo> clients)? onClientChanged;
 
-  /// Stream of incoming WebSocket messages from mobile clients.
+  /// Called when a new web client needs PIN verification.
+  /// The desktop should display this PIN to the user.
+  void Function(String clientIp, String clientName, String pin)? onPinGenerated;
+
+  /// Stream of incoming WebSocket messages from authenticated mobile clients.
   Stream<Map<String, dynamic>> get onMessage => _incomingMessages.stream;
 
-  /// Currently connected web clients info.
-  List<WebClientInfo> get clients => List.unmodifiable(_connectedClients);
+  /// Currently connected web clients info (authenticated only for external use).
+  List<WebClientInfo> get clients =>
+      List.unmodifiable(_connectedClients.where((c) => c.authenticated));
+
+  /// All connected clients including unauthenticated.
+  List<WebClientInfo> get allClients => List.unmodifiable(_connectedClients);
 
   int get port => _server?.port ?? 0;
   bool get isRunning => _server != null;
@@ -84,21 +102,51 @@ class EmbeddedWebServer {
     _connectedClients.add(clientInfo);
 
     Log.i(_tag, 'WebSocket connected from $clientIp (${_connectedClients.length} clients)');
-    onClientChanged?.call(_connectedClients);
+
+    // Generate PIN and nonce for this client.
+    final pin = _generatePin();
+    final nonce = _generateNonce();
+    clientInfo._pin = pin;
+    clientInfo._nonce = nonce;
+
+    // Send auth challenge to web client.
+    _sendToClient(clientInfo, 'auth:challenge', {'nonce': nonce});
+
+    // Notify desktop to display the PIN.
+    onPinGenerated?.call(clientIp, clientInfo.name, pin);
 
     socket.listen(
       (data) {
         try {
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
+          final event = msg['event'] as String?;
 
-          // Handle device:info to update client name.
-          if (msg['event'] == 'device:info') {
+          // Handle device:info (allowed before auth).
+          if (event == 'device:info') {
             final info = msg['data'] as Map<String, dynamic>?;
             if (info != null) {
               clientInfo.name = (info['name'] as String?) ?? 'Mobile Browser';
               Log.i(_tag, 'Client identified: ${clientInfo.name} ($clientIp)');
+              // Re-notify with updated name.
+              if (!clientInfo.authenticated) {
+                onPinGenerated?.call(clientIp, clientInfo.name, clientInfo._pin!);
+              }
               onClientChanged?.call(_connectedClients);
             }
+            return;
+          }
+
+          // Handle auth:verify.
+          if (event == 'auth:verify') {
+            _handleAuthVerify(clientInfo, msg['data'] as Map<String, dynamic>?);
+            return;
+          }
+
+          // Block all other messages until authenticated.
+          if (!clientInfo.authenticated) {
+            _sendToClient(clientInfo, 'auth:required', {
+              'message': 'PIN verification required',
+            });
             return;
           }
 
@@ -121,6 +169,45 @@ class EmbeddedWebServer {
     );
   }
 
+  Future<void> _handleAuthVerify(WebClientInfo client, Map<String, dynamic>? data) async {
+    if (data == null || client._pin == null || client._nonce == null) {
+      _sendToClient(client, 'auth:failed', {'message': 'Invalid request'});
+      return;
+    }
+
+    final receivedHmac = data['hmac'] as String?;
+    if (receivedHmac == null) {
+      _sendToClient(client, 'auth:failed', {'message': 'Missing HMAC'});
+      return;
+    }
+
+    // Compute expected HMAC(PIN, nonce).
+    final expectedHmac = await _computeHmac(client._pin!, client._nonce!);
+
+    if (receivedHmac != expectedHmac) {
+      Log.w(_tag, 'PIN verification failed from ${client.name} (${client.ip})');
+      _sendToClient(client, 'auth:failed', {'message': 'Invalid PIN'});
+      return;
+    }
+
+    // PIN verified!
+    client.authenticated = true;
+    client._pin = null;
+    client._nonce = null;
+
+    Log.i(_tag, 'Client authenticated: ${client.name} (${client.ip})');
+    _sendToClient(client, 'auth:success', {'message': 'Authenticated'});
+    onClientChanged?.call(_connectedClients);
+  }
+
+  void _sendToClient(WebClientInfo client, String event, Map<String, dynamic> data) {
+    try {
+      client.socket.add(jsonEncode({'event': event, 'data': data}));
+    } catch (e) {
+      _connectedClients.remove(client);
+    }
+  }
+
   Future<void> _handleApi(HttpRequest request) async {
     final path = request.uri.path;
 
@@ -128,7 +215,7 @@ class EmbeddedWebServer {
       request.response.headers.contentType = ContentType.json;
       request.response.write(jsonEncode({
         'status': 'ok',
-        'clients': _connectedClients.length,
+        'clients': clients.length,
       }));
       await request.response.close();
       return;
@@ -190,10 +277,11 @@ class EmbeddedWebServer {
     }
   }
 
-  /// Broadcast a message to all connected WebSocket clients.
+  /// Broadcast a message to all authenticated WebSocket clients.
   void broadcast(String event, Map<String, dynamic> data) {
     final msg = jsonEncode({'event': event, 'data': data});
     for (final client in _connectedClients.toList()) {
+      if (!client.authenticated) continue;
       try {
         client.socket.add(msg);
       } catch (e) {
@@ -212,6 +300,25 @@ class EmbeddedWebServer {
         'ico' => ContentType('image', 'x-icon'),
         _ => ContentType.binary,
       };
+
+  String _generatePin() {
+    final rng = Random.secure();
+    return List.generate(6, (_) => rng.nextInt(10)).join();
+  }
+
+  String _generateNonce() {
+    final rng = Random.secure();
+    final bytes = List.generate(32, (_) => rng.nextInt(256));
+    return base64Encode(bytes);
+  }
+
+  Future<String> _computeHmac(String pin, String nonce) async {
+    final hmacAlgo = Hmac.sha256();
+    final key = utf8.encode(pin);
+    final data = utf8.encode(nonce);
+    final mac = await hmacAlgo.calculateMac(data, secretKey: SecretKey(key));
+    return base64Encode(mac.bytes);
+  }
 
   Future<void> stop() async {
     for (final client in _connectedClients.toList()) {

@@ -20,6 +20,36 @@ const UI = (() => {
     el.className = `status ${connected ? 'connected' : 'disconnected'}`;
   }
 
+  function showPinOverlay() {
+    const overlay = document.getElementById('pin-overlay');
+    overlay.classList.add('visible');
+    const input = document.getElementById('pin-input');
+    input.value = '';
+    input.focus();
+    document.getElementById('pin-error').textContent = '';
+
+    // Set status to show we're waiting for PIN.
+    const el = document.getElementById('connection-status');
+    el.textContent = 'PIN Required';
+    el.className = 'status disconnected';
+  }
+
+  function hidePinOverlay() {
+    const overlay = document.getElementById('pin-overlay');
+    overlay.classList.remove('visible');
+  }
+
+  function setPinError(message) {
+    const el = document.getElementById('pin-error');
+    el.textContent = message;
+    // Shake the input.
+    const input = document.getElementById('pin-input');
+    input.classList.add('shake');
+    setTimeout(() => input.classList.remove('shake'), 500);
+    input.value = '';
+    input.focus();
+  }
+
   function renderClipboardHistory(items) {
     const container = document.getElementById('clipboard-history');
 
@@ -125,6 +155,9 @@ const UI = (() => {
   return {
     initTabs,
     setConnectionStatus,
+    showPinOverlay,
+    hidePinOverlay,
+    setPinError,
     renderClipboardHistory,
     renderDeviceList,
     renderTransferList,

@@ -51,6 +51,9 @@ class AppService {
   void Function(String deviceId)? onPeerDisconnected;
   void Function(String deviceId, String reason)? onPairFailed;
 
+  /// Called when a mobile web client needs PIN verification.
+  void Function(String clientIp, String clientName, String pin)? onWebPinGenerated;
+
   AppService();
 
   Future<void> start(String webClientPath) async {
@@ -85,6 +88,11 @@ class AppService {
 
     // Wire WebSocket messages from mobile clients.
     webServer.onMessage.listen(_handleWebSocketMessage);
+
+    // Wire mobile PIN verification callback.
+    webServer.onPinGenerated = (clientIp, clientName, pin) {
+      onWebPinGenerated?.call(clientIp, clientName, pin);
+    };
 
     // When a mobile client connects/disconnects/identifies, update everything.
     webServer.onClientChanged = (clients) {

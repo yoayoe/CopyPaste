@@ -14,8 +14,8 @@ const App = (() => {
 
     // Connection events.
     WS.on('_connected', () => {
-      UI.setConnectionStatus(true);
-      // Send device info to server.
+      // Don't set connected status yet — wait for auth.
+      // Send device info to server (allowed before auth).
       WS.send('device:info', {
         name: getDeviceName(),
         userAgent: navigator.userAgent,
@@ -32,6 +32,12 @@ const App = (() => {
         bar.textContent = 'WS: ' + url + ' | UA: ' + navigator.userAgent.substring(0, 60) + '...';
       }
     });
+
+    // Auth events.
+    WS.on('auth:challenge', (data) => Auth.handleChallenge(data));
+    WS.on('auth:success', () => Auth.handleSuccess());
+    WS.on('auth:failed', (data) => Auth.handleFailed(data));
+    WS.on('auth:required', () => UI.toast('Please enter PIN first'));
 
     // Clipboard events from desktop.
     WS.on('clipboard:update', (data) => {
@@ -97,6 +103,22 @@ const App = (() => {
     document.getElementById('btn-read-clipboard').addEventListener('click', readClipboard);
     document.getElementById('btn-pick-file').addEventListener('click', pickFile);
     document.getElementById('file-input').addEventListener('change', handleFileSelected);
+
+    // PIN verification handlers.
+    document.getElementById('btn-verify-pin').addEventListener('click', verifyPin);
+    document.getElementById('pin-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') verifyPin();
+    });
+  }
+
+  function verifyPin() {
+    const input = document.getElementById('pin-input');
+    const pin = input.value.trim();
+    if (pin.length !== 6) {
+      UI.setPinError('PIN must be 6 digits');
+      return;
+    }
+    Auth.submitPin(pin);
   }
 
   async function sendClipboard() {
