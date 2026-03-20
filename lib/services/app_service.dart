@@ -37,6 +37,9 @@ class AppService {
   /// Clipboard history for syncing to new web clients.
   final List<Map<String, dynamic>> _clipboardHistory = [];
 
+  /// Transfer history for syncing to new/reconnecting web clients.
+  final List<Map<String, dynamic>> _transferHistory = [];
+
   // --- Callbacks for UI ---
   void Function(String deviceId, String deviceName, String platform, String ip)?
       onDeviceFound;
@@ -57,6 +60,9 @@ class AppService {
 
   /// Called when a mobile web client needs PIN verification.
   void Function(String clientIp, String clientName, String pin)? onWebPinGenerated;
+
+  /// Called when a mobile web client successfully authenticates.
+  void Function(String clientIp, String clientName)? onWebClientAuthenticated;
 
   /// File transfer callbacks.
   void Function(TransferTask task)? onTransferProgress;
@@ -107,6 +113,9 @@ class AppService {
     webServer.onPinGenerated = (clientIp, clientName, pin) {
       onWebPinGenerated?.call(clientIp, clientName, pin);
     };
+    webServer.onClientAuthenticated = (clientIp, clientName) {
+      onWebClientAuthenticated?.call(clientIp, clientName);
+    };
 
     // When a mobile client connects/disconnects/identifies, update everything.
     webServer.onClientChanged = (clients) {
@@ -115,9 +124,12 @@ class AppService {
           .map((c) => (name: c.name, ip: c.ip))
           .toList();
       onWebClientsChanged?.call(clientList);
-      // Send clipboard history to connected clients.
+      // Send clipboard and transfer history to connected clients.
       if (clients.isNotEmpty) {
         webServer.broadcast('clipboard:history', {'items': _clipboardHistory});
+        if (_transferHistory.isNotEmpty) {
+          webServer.broadcast('transfer:history', {'items': _transferHistory});
+        }
       }
     };
 
@@ -151,7 +163,7 @@ class AppService {
 
       // Also make the uploaded file available for other mobile clients to download.
       final downloadId = webServer.addFileForDownload(savedPath, filename, checksum);
-      webServer.broadcast('transfer:complete', {
+      _broadcastTransferComplete({
         'id': downloadId,
         'downloadId': downloadId,
         'filename': filename,
@@ -275,7 +287,7 @@ class AppService {
   /// Make a file available for mobile download and notify web clients.
   void shareFileToMobile(String filePath, String filename, int size) {
     final fileId = webServer.addFileForDownload(filePath, filename, '');
-    webServer.broadcast('transfer:complete', {
+    _broadcastTransferComplete({
       'id': fileId,
       'downloadId': fileId,
       'filename': filename,
@@ -299,7 +311,7 @@ class AppService {
       // Register received files for mobile download.
       if (task.direction == TransferDirection.receive && path.isNotEmpty) {
         final fileId = webServer.addFileForDownload(path, task.filename, '');
-        webServer.broadcast('transfer:complete', {
+        _broadcastTransferComplete({
           'id': fileId,
           'downloadId': fileId,
           'filename': task.filename,
@@ -319,6 +331,13 @@ class AppService {
   void _addToHistory(Map<String, dynamic> item) {
     _clipboardHistory.insert(0, item);
     if (_clipboardHistory.length > 50) _clipboardHistory.removeLast();
+  }
+
+  /// Record a completed transfer and broadcast to mobile clients.
+  void _broadcastTransferComplete(Map<String, dynamic> data) {
+    _transferHistory.insert(0, data);
+    if (_transferHistory.length > 50) _transferHistory.removeLast();
+    webServer.broadcast('transfer:complete', data);
   }
 
   void _onClipboardChanged(String content) {

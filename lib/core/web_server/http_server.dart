@@ -52,6 +52,9 @@ class EmbeddedWebServer {
   /// The desktop should display this PIN to the user.
   void Function(String clientIp, String clientName, String pin)? onPinGenerated;
 
+  /// Called when a web client successfully authenticates.
+  void Function(String clientIp, String clientName)? onClientAuthenticated;
+
   /// Stream of incoming WebSocket messages from authenticated mobile clients.
   Stream<Map<String, dynamic>> get onMessage => _incomingMessages.stream;
 
@@ -235,6 +238,7 @@ class EmbeddedWebServer {
       'message': 'Authenticated',
       'sessionToken': sessionToken,
     });
+    onClientAuthenticated?.call(client.ip, client.name);
     onClientChanged?.call(_connectedClients);
   }
 

@@ -239,6 +239,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _showMobilePinDialog(clientIp, clientName, pin);
     };
 
+    // Auto-close PIN dialog when mobile client authenticates.
+    appService.onWebClientAuthenticated = (clientIp, clientName) {
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$clientName connected')),
+      );
+    };
+
     // File transfer callbacks — only for snackbar notifications.
     // The actual provider updates happen via transferStream listener above.
     appService.onTransferComplete = (task, path) {

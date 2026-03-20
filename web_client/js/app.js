@@ -52,6 +52,27 @@ const App = (() => {
       UI.renderClipboardHistory(clipboardHistory);
     });
 
+    // Restore transfer history on reconnect/refresh.
+    WS.on('transfer:history', (data) => {
+      const items = data.items || [];
+      for (const item of items) {
+        const exists = transfers.find(t => t.id === item.id);
+        if (!exists) {
+          transfers.push({
+            id: item.id,
+            filename: item.filename,
+            totalBytes: item.size || 0,
+            progress: 1,
+            status: 'completed',
+            direction: 'receive',
+            deviceName: item.deviceName || 'Desktop',
+            downloadId: item.downloadId || item.id,
+          });
+        }
+      }
+      UI.renderTransferList(transfers);
+    });
+
     // Device events.
     WS.on('device:list', (data) => {
       devices = data.devices || [];
@@ -176,7 +197,7 @@ const App = (() => {
     if (!files || files.length === 0) return;
 
     for (const file of files) {
-      const transferId = crypto.randomUUID();
+      const transferId = generateId();
       transfers.unshift({
         id: transferId,
         filename: file.name,
@@ -235,6 +256,18 @@ const App = (() => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1048576).toFixed(1)} MB`;
+  }
+
+  function generateId() {
+    // crypto.randomUUID() requires secure context (HTTPS/localhost).
+    // Fallback for plain HTTP on mobile browsers.
+    if (crypto.randomUUID) {
+      try { return crypto.randomUUID(); } catch (e) { /* fall through */ }
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
   }
 
   function getDeviceName() {
