@@ -5,7 +5,7 @@
 #### Phase 1: Foundation & Discovery
 - [x] Setup Flutter project (desktop only: Linux) ✅
 - [ ] Implementasi mDNS discovery (advertise + browse)
-  - [x] Discovery service implementation (macOS ready)
+  - [x] Discovery service implementation (macOS ready) ✅
   - [ ] Linux mDNS — `nsd` plugin tidak support Linux, perlu alternatif (avahi/dbus)
 - [x] Desktop device list UI ✅
 - [x] Basic TCP server/client between desktops ✅
@@ -42,7 +42,8 @@
 - [x] WebSocket handler ✅
 - [x] Web SPA: HTML/CSS/JS skeleton ✅
 - [x] QR code generation ✅
-- [ ] Token auth (QR code berisi one-time token)
+- [x] PIN-based auth for web clients (6-digit PIN verification) ✅
+- [x] Session token caching (reconnect tanpa PIN ulang via localStorage) ✅
 - [x] Mobile → Desktop: send clipboard text via WebSocket ✅
 - [x] Desktop → Mobile: push clipboard updates via WebSocket ✅
 - [x] Device identification via User-Agent parsing ✅
@@ -56,6 +57,9 @@
 - Device name di-parse dari User-Agent (misal: "SM-A546E", "iPhone")
 - Static files di-serve dengan no-cache header (development)
 - Dark/light theme mengikuti system preference (CSS `prefers-color-scheme`)
+- PIN auth: server generates PIN + nonce → mobile input PIN → verify → issue session token
+- Web Crypto API (`crypto.subtle`) tidak tersedia di HTTP — fallback ke direct PIN verification
+- Session token disimpan di localStorage (`cp_session_token`), dikirim via WebSocket query param saat reconnect
 
 #### Phase 3.5: macOS Build & Test
 - [x] Generate macOS platform files (`flutter create --platforms macos .`) ✅
@@ -82,13 +86,22 @@
 - Transfer progress real-time di desktop (LinearProgressIndicator) dan web client
 - Desktop UI memiliki tab Files dengan FAB untuk pick & send file
 - File disimpan di temp directory (`/tmp/copypaste_files/`)
+- Custom multipart parser (`mime_parser.dart`) karena Dart tidak ada built-in parser
 
 #### Phase 5: Security
 - [x] Desktop ↔ Desktop: PIN-based pairing + HMAC-SHA256 + HKDF session key ✅
+- [x] Desktop ↔ Mobile: PIN-based authentication + session token ✅
 - [ ] Desktop ↔ Desktop: upgrade to X25519 key exchange + AES-256-GCM (optional)
-- [ ] Desktop ↔ Mobile: self-signed TLS (HTTPS)
-- [ ] Session management + token expiry
+- [ ] Desktop ↔ Mobile: self-signed TLS (HTTPS + WSS)
+- [ ] Session management + token expiry + revocation
 - [ ] Secure key storage (macOS Keychain, Linux libsecret)
+
+**Catatan Phase 5:**
+- Desktop↔Desktop: PIN pairing + HMAC auth sudah berjalan penuh
+- Desktop↔Mobile: PIN auth + session token caching sudah berjalan penuh
+- X25519 + AES-256-GCM adalah optional upgrade untuk encrypted transport
+- Self-signed TLS untuk HTTPS belum diimplementasi (HTTP acceptable untuk local network)
+- Key storage masih in-memory (hilang saat app restart)
 
 #### Phase 6: Polish & UX
 - [ ] Image clipboard support
@@ -106,6 +119,7 @@
 - [x] Packaging: .deb (Linux) — `scripts/build-deb.sh` ✅
 - [x] Packaging: .dmg (macOS) — `scripts/build-dmg.sh` ✅
 - [x] README & user documentation ✅
+- [x] Architecture documentation ✅
 - [x] MIT License ✅
 - [ ] First GitHub release
 
@@ -117,15 +131,32 @@
 
 ---
 
+### Progress Summary
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| Phase 1: Foundation & Discovery | Mostly done (mDNS Linux pending) | ~85% |
+| Phase 2: Desktop Clipboard Sync | **Complete** | 100% |
+| Phase 3: Web Server + Web Client | **Complete** | 100% |
+| Phase 3.5: macOS Build & Test | Mostly done (mDNS test pending) | ~90% |
+| Phase 4: File Transfer | **Complete** | 100% |
+| Phase 5: Security | Core auth done, encryption upgrade pending | ~50% |
+| Phase 6: Polish & UX | Theme done, rest pending | ~15% |
+| Phase 7: v1 Release | Packaging & docs done, tests/CI pending | ~60% |
+
+---
+
 ### Known Issues & TODO
 
 | Issue | Detail | Priority |
 |-------|--------|----------|
 | Linux mDNS | `nsd` plugin tidak support Linux desktop. Workaround: manual IP connection | Medium |
-| Token auth | QR code belum berisi one-time token, URL langsung tanpa auth | Medium |
 | Clipboard polling | Menggunakan polling 500ms, bukan native listener per-platform | Low |
 | Flutter snap | Tidak bisa dipakai karena AppArmor. Harus manual install | Info |
+| Key persistence | Session keys hilang saat app restart — perlu secure storage | Medium |
 | ~~Desktop ↔ Desktop sync~~ | ~~Solved~~ — PIN-based pairing + HMAC + persistent TCP | Done |
+| ~~Mobile auth~~ | ~~Solved~~ — PIN verification + session token caching | Done |
+| ~~Token auth (QR)~~ | ~~Replaced~~ — PIN-based auth menggantikan one-time QR token | Done |
 
 ---
 

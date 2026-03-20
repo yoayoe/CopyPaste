@@ -141,9 +141,10 @@ Dua channel komunikasi terpisah:
 │  │  │  Client  │  encrypted data    │  Server  │          │  │
 │  │  └──────────┘                    └──────────┘          │  │
 │  │                                                         │  │
-│  │  - Binary protocol (custom frame)                       │  │
-│  │  - Auto clipboard sync                                  │  │
-│  │  - Chunked file transfer                                │  │
+│  │  - Binary protocol v2 (12-byte header)                   │  │
+│  │  - PeerConnection: persistent TCP with message framing  │  │
+│  │  - PIN-based pairing + HMAC-SHA256 authentication       │  │
+│  │  - Auto clipboard sync + chunked file transfer (64KB)   │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐  │
@@ -156,6 +157,7 @@ Dua channel komunikasi terpisah:
 │  │  └──────────┘                    │  + Static Files  │  │  │
 │  │                                  └──────────────────┘  │  │
 │  │  - JSON messages over WebSocket                        │  │
+│  │  - PIN-based authentication + session token caching    │  │
 │  │  - File upload/download via HTTP multipart             │  │
 │  │  - Web UI served as static SPA                         │  │
 │  └─────────────────────────────────────────────────────────┘  │
@@ -205,12 +207,12 @@ Setiap desktop app menjalankan embedded HTTP server yang serve web UI untuk mobi
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**QR Code Connection Flow:**
+**QR Code + PIN Connection Flow:**
 ```
 Desktop App                              Mobile Phone
     │                                        │
     │  1. Generate QR code containing:       │
-    │     http://<local-ip>:<port>?token=xyz │
+    │     http://<local-ip>:<port>           │
     │     (tampil di desktop screen)         │
     │                                        │
     │                          2. Scan QR    │
@@ -220,20 +222,54 @@ Desktop App                              Mobile Phone
     │  4. Serve Web SPA     ◄────────────────│  GET /
     │  ────────────────────►                 │
     │                                        │
-    │  5. WebSocket connect ◄════════════════│  WS /ws?token=xyz
+    │  5. WebSocket connect ◄════════════════│  WS /ws
     │  ═════════════════════►                │
     │                                        │
-    │  6. Validate token                     │
-    │  7. Add to connected devices           │
+    │  6. Generate 6-digit PIN               │
+    │  7. Show PIN dialog on desktop         │
+    │  8. Send auth:challenge to mobile      │
+    │  ════════════════════════════════►      │
+    │                                        │
+    │                          9. Show PIN   │
+    │                             input      │
+    │                         10. User       │
+    │                             enters PIN │
+    │                                        │
+    │  11. Verify PIN       ◄════════════════│  auth:verify
+    │  12. Generate session token            │
+    │  13. Send auth:success + token         │
+    │  ════════════════════════════════►      │
+    │                                        │  14. Save token
+    │  15. Add to connected devices          │      to localStorage
     │                                        │
     │  ◄──── Real-time sync active ────►     │
     │                                        │
 ```
 
-**Token Security:**
-- QR code berisi one-time token yang expire setelah 5 menit atau setelah digunakan
-- Setelah connect pertama, server issue session token (disimpan di browser localStorage)
-- Session token valid selama device masih di jaringan yang sama
+**Reconnect Flow (tanpa PIN ulang):**
+```
+Mobile Phone                             Desktop App
+    │                                        │
+    │  1. Page refresh / reconnect           │
+    │  2. Read token from localStorage       │
+    │  3. WebSocket connect with token       │
+    │  WS /ws?token=<saved-token>            │
+    │  ════════════════════════════════►      │
+    │                                        │
+    │                       4. Validate token │
+    │                       5. Auto-auth     │
+    │  auth:success         ◄════════════════│
+    │                                        │
+    │  ◄──── Sync resumed instantly ────►    │
+```
+
+**Session Security:**
+- PIN 6-digit generated per mobile connection
+- Session token generated setelah PIN verified
+- Token disimpan di browser localStorage (`cp_session_token`)
+- Token disimpan di server in-memory Set
+- Reconnect via token — no PIN re-entry needed
+- Token hilang saat server restart (by design — re-pair needed)
 
 ---
 
@@ -241,29 +277,32 @@ Desktop App                              Mobile Phone
 
 Dua format protocol berbeda untuk dua channel komunikasi:
 
-#### 3.4.1 Binary Protocol (Desktop ↔ Desktop via TCP)
+#### 3.4.1 Binary Protocol v2 (Desktop ↔ Desktop via TCP)
 
 ```
-┌─────────────────────────────────────────────────┐
-│           Binary Message Frame (TCP)            │
-│                                                 │
-│  ┌──────────┬──────────┬───────────────────┐    │
-│  │  Header  │  Meta    │     Payload       │    │
-│  │  8 bytes │  N bytes │     M bytes       │    │
-│  └──────────┴──────────┴───────────────────┘    │
-│                                                 │
-│  Header:                                        │
-│    - magic (2 bytes): 0xCP                      │
-│    - version (1 byte): protocol version         │
-│    - type (1 byte): message type                │
-│    - meta_length (4 bytes): ukuran metadata     │
-│                                                 │
-│  Meta (JSON):                                   │
-│    - filename, mime_type, size, checksum, dll    │
-│                                                 │
-│  Payload:                                       │
-│    - raw bytes (text content / file bytes)       │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│           Binary Message Frame v2 (TCP)              │
+│                                                      │
+│  ┌───────────┬──────────┬───────────────────┐        │
+│  │  Header   │  Meta    │     Payload       │        │
+│  │  12 bytes │  N bytes │     M bytes       │        │
+│  └───────────┴──────────┴───────────────────┘        │
+│                                                      │
+│  Header (12 bytes):                                  │
+│    [0]   magic byte 1 (0x43 = 'C')                   │
+│    [1]   magic byte 2 (0x50 = 'P')                   │
+│    [2]   protocol version (currently: 2)             │
+│    [3]   message type code                           │
+│    [4-7] metadata length (uint32, big-endian)        │
+│    [8-11] payload length (uint32, big-endian)        │
+│                                                      │
+│  Meta (JSON):                                        │
+│    - filename, mime_type, size, checksum,            │
+│      sender, senderName, hmac, dll                   │
+│                                                      │
+│  Payload:                                            │
+│    - raw bytes (text content / file chunk bytes)     │
+└──────────────────────────────────────────────────────┘
 ```
 
 **Message Types (TCP):**
@@ -271,13 +310,44 @@ Dua format protocol berbeda untuk dua channel komunikasi:
 | Type Code | Nama | Deskripsi |
 |-----------|------|-----------|
 | `0x01` | `TEXT` | Clipboard text content |
-| `0x02` | `IMAGE` | Clipboard image |
-| `0x03` | `FILE` | File transfer (single file) |
-| `0x04` | `FILES` | Multiple files transfer |
+| `0x02` | `IMAGE` | Clipboard image (planned) |
+| `0x03` | `FILE` | File transfer chunk (64KB per chunk) |
+| `0x04` | `FILES` | Multiple files transfer (planned) |
 | `0x05` | `PING` | Heartbeat / connectivity check |
 | `0x06` | `PONG` | Response to PING |
 | `0x07` | `ACK` | Transfer acknowledgement |
 | `0x08` | `REJECT` | Transfer ditolak |
+| `0x10` | `PAIR_REQUEST` | Pairing handshake: initiate pairing |
+| `0x11` | `PAIR_CHALLENGE` | Pairing handshake: server sends nonce |
+| `0x12` | `PAIR_RESPONSE` | Pairing handshake: client sends HMAC(PIN+nonce) |
+| `0x13` | `PAIR_CONFIRM` | Pairing handshake: server confirms pairing |
+| `0x14` | `DISCONNECT` | Connection control: graceful disconnect |
+
+**Pairing Handshake Flow (TCP):**
+```
+Desktop A (initiator)                  Desktop B (responder)
+    │                                       │
+    │  pairRequest(deviceId, deviceName)     │
+    │  ────────────────────────────────────► │
+    │                                       │  Generate 6-digit PIN
+    │                                       │  Generate random nonce
+    │                                       │  Show PIN to user
+    │  pairChallenge(nonce)                 │
+    │  ◄──────────────────────────────────── │
+    │                                       │
+    │  User enters PIN on Desktop A         │
+    │  Compute HMAC-SHA256(PIN, nonce)       │
+    │  Derive session key via HKDF          │
+    │                                       │
+    │  pairResponse(hmac)                   │
+    │  ────────────────────────────────────► │
+    │                                       │  Verify HMAC
+    │                                       │  Derive session key
+    │  pairConfirm(success)                 │
+    │  ◄──────────────────────────────────── │
+    │                                       │
+    │  ◄═══ Paired: auto clipboard sync ═══►│
+```
 
 #### 3.4.2 JSON Protocol (Desktop ↔ Mobile via WebSocket)
 
@@ -299,6 +369,11 @@ WebSocket menggunakan JSON messages yang lebih sederhana (browser-friendly).
 
 | Event | Direction | Deskripsi |
 |-------|-----------|-----------|
+| `auth:challenge` | Server → Client | PIN challenge (nonce) — mobile harus input PIN |
+| `auth:verify` | Client → Server | Mobile mengirim PIN untuk verifikasi |
+| `auth:success` | Server → Client | PIN verified, berisi session token |
+| `auth:failed` | Server → Client | PIN salah |
+| `auth:required` | Server → Client | Token expired, perlu PIN ulang |
 | `clipboard:update` | Server → Client | Desktop clipboard berubah, kirim ke mobile |
 | `clipboard:send` | Client → Server | Mobile mengirim teks ke desktop clipboard |
 | `clipboard:fetch` | Client → Server | Mobile request clipboard content saat ini |
@@ -318,54 +393,53 @@ WebSocket menggunakan JSON messages yang lebih sederhana (browser-friendly).
 
 ---
 
-### 3.5 Encryption Layer
+### 3.5 Security Layer
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    Encryption Layer                          │
+│                     Security Layer                           │
 │                                                              │
 │  Desktop ↔ Desktop (TCP):                                   │
-│  ┌──────────┐   PIN/QR Code   ┌──────────┐                  │
+│  ┌──────────┐   6-digit PIN   ┌──────────┐                  │
 │  │ Desktop A│ ◄──────────────► │ Desktop B│                  │
-│  │          │  Key Exchange    │          │                  │
-│  │          │  (X25519 ECDH)   │          │                  │
+│  │          │  HMAC-SHA256     │          │                  │
+│  │          │  verification    │          │                  │
 │  └──────────┘                  └──────────┘                  │
 │       │                             │                        │
 │       ▼                             ▼                        │
-│  AES-256-GCM encrypt ────────► AES-256-GCM decrypt          │
+│  Session key (HKDF) ────────► HMAC on all messages          │
 │                                                              │
 │  Desktop ↔ Mobile (WebSocket):                              │
 │  ┌──────────┐   QR Code       ┌──────────┐                  │
 │  │ Desktop  │ ──────────────► │  Mobile  │                  │
-│  │          │  URL + token    │  Browser │                  │
+│  │          │  URL + PIN      │  Browser │                  │
 │  │          │                 │          │                  │
-│  │  HTTPS   │ ◄═════════════► │  HTTPS   │                  │
-│  │  (TLS)   │  WebSocket WSS  │  (TLS)   │                  │
+│  │  HTTP +  │ ◄═════════════► │  HTTP +  │                  │
+│  │  WS      │  PIN verify     │  WS      │                  │
 │  └──────────┘                  └──────────┘                  │
 │                                                              │
 │  Mobile connection dilindungi oleh:                          │
-│  - Self-signed TLS certificate (HTTPS)                      │
-│  - One-time token dalam QR code                             │
-│  - Session-based authentication                              │
+│  - 6-digit PIN verification (shown on desktop)              │
+│  - Session token setelah PIN verified (localStorage)        │
+│  - Auto-reconnect tanpa PIN ulang (token-based)             │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Desktop ↔ Desktop:**
-- **Key Exchange**: X25519 ECDH
-- **Symmetric Encryption**: AES-256-GCM
-- **Pairing Flow**:
-  1. Device A generate keypair, tampilkan PIN 6 digit
-  2. Device B input PIN → exchange public keys via TCP
-  3. Derive shared secret → simpan lokal
-- **Per-message**: Random nonce/IV unik
+**Desktop ↔ Desktop (Current Implementation):**
+- **Pairing**: 6-digit PIN displayed on responder
+- **Verification**: HMAC-SHA256(PIN, nonce) — nonce dari server
+- **Session Key**: HKDF-SHA256(PIN + nonce) untuk ongoing authentication
+- **Per-message**: HMAC authentication menggunakan session key
+- **Persistent Connection**: TCP connection tetap terbuka setelah pairing
+- **Future upgrade**: X25519 ECDH key exchange + AES-256-GCM encryption (Phase 5)
 
-**Desktop ↔ Mobile:**
-- **Transport Security**: Self-signed TLS (HTTPS + WSS)
-  - Desktop generate self-signed certificate saat pertama kali run
-  - Browser akan tampilkan warning → user accept sekali
-  - Alternatif: HTTP biasa (acceptable karena local network only)
-- **Authentication**: One-time QR token + session token
-- **Data in transit**: Dilindungi oleh TLS layer
+**Desktop ↔ Mobile (Current Implementation):**
+- **Authentication**: 6-digit PIN shown on desktop, entered on mobile
+- **PIN Verification**: Direct PIN match atau HMAC (fallback untuk non-HTTPS)
+- **Session Token**: Generated setelah PIN verified, saved di localStorage
+- **Auto-reconnect**: Token dikirim via WebSocket query param `?token=...`
+- **Transport**: HTTP + WS (local network only — acceptable security model)
+- **Future upgrade**: Self-signed TLS (HTTPS + WSS) untuk encrypted transport (Phase 5)
 
 ---
 
@@ -529,24 +603,22 @@ Menangani pengiriman dan penerimaan file. Berbeda flow untuk desktop dan mobile.
 ```
 Desktop A                                     Desktop B
    │                                              │
+   │  (Already paired via PIN — persistent        │
+   │   TCP connection with HKDF session key)      │
+   │                                              │
    │  1. User copies text                         │
-   │  ClipboardMonitor detects change             │
+   │  ClipboardMonitor detects change (500ms poll)│
    │                                              │
-   │  2. Encrypt payload (AES-256-GCM)           │
+   │  2. Create Message.text() with HMAC          │
    │                                              │
-   │  3. TCP connect to Desktop B                 │
-   │  ════════════════════════════════════►        │
-   │                                              │
-   │  4. Send [Header][Meta][Encrypted Payload]   │
+   │  3. Send via PeerConnection (already open)   │
+   │  [12B Header][JSON Meta + HMAC][Text Payload]│
    │  ──────────────────────────────────────►     │
    │                                              │
-   │                     5. Decrypt payload       │
-   │                     6. Write to clipboard    │
-   │                     7. Notify web clients    │
+   │                     4. Verify HMAC           │
+   │                     5. Write to clipboard    │
+   │                     6. Notify web clients    │
    │                     ◄──────────────────      │
-   │                                              │
-   │  8. Receive ACK                              │
-   │  ◄──────────────────────────────────────     │
 ```
 
 ### 4.2 Mobile → Desktop: Send Clipboard Text
@@ -655,104 +727,81 @@ copy-paste/
 │   │
 │   ├── core/                                  # Core networking & protocol
 │   │   ├── discovery/
-│   │   │   ├── discovery_service.dart         # mDNS advertise & browse
-│   │   │   └── device_resolver.dart           # Resolve device IP/port
+│   │   │   └── discovery_service.dart         # mDNS advertise & browse (macOS)
 │   │   ├── network/
-│   │   │   ├── tcp_server.dart                # TCP server (desktop ↔ desktop)
-│   │   │   ├── tcp_client.dart                # TCP client (desktop ↔ desktop)
-│   │   │   └── connection_manager.dart        # Manage active connections
+│   │   │   ├── tcp_server.dart                # TCP server — accepts sockets
+│   │   │   ├── tcp_client.dart                # TCP client — connect to peer
+│   │   │   └── peer_connection.dart           # Persistent TCP connection with
+│   │   │                                      #   message framing & buffer management
 │   │   ├── protocol/
-│   │   │   ├── message.dart                   # Binary message frame
-│   │   │   ├── header.dart                    # Header parsing/building
-│   │   │   ├── serializer.dart                # Serialize/deserialize
-│   │   │   └── message_type.dart              # Message type enum
-│   │   ├── encryption/
-│   │   │   ├── key_exchange.dart              # X25519 ECDH
-│   │   │   ├── cipher.dart                    # AES-256-GCM
-│   │   │   └── key_store.dart                 # Persist paired keys
+│   │   │   ├── header.dart                    # 12-byte binary header (v2)
+│   │   │   ├── message.dart                   # Message frame: serialize/deserialize
+│   │   │   └── message_type.dart              # Enum: text, file, pairing, disconnect
+│   │   ├── encryption/                        # (Planned: X25519 + AES-256-GCM)
 │   │   └── web_server/
-│   │       ├── http_server.dart               # Embedded HTTP server
-│   │       ├── websocket_handler.dart         # WebSocket connection handler
-│   │       ├── routes/
-│   │       │   ├── static_routes.dart         # Serve web SPA files
-│   │       │   ├── upload_route.dart          # POST /api/upload
-│   │       │   ├── download_route.dart        # GET /api/download/:id
-│   │       │   └── status_route.dart          # GET /api/status
-│   │       └── session_manager.dart           # Token & session management
+│   │       └── http_server.dart               # Embedded HTTP + WebSocket server
+│   │                                          #   PIN auth, file upload/download,
+│   │                                          #   session token management
 │   │
 │   ├── services/                              # Business logic
-│   │   ├── clipboard_service.dart             # Monitor & manage clipboard
-│   │   ├── transfer_service.dart              # Orchestrate send/receive
-│   │   ├── file_service.dart                  # File pick, save, chunking
-│   │   ├── pairing_service.dart               # Desktop pairing flow
-│   │   ├── qr_service.dart                    # QR code generation for mobile
-│   │   ├── notification_service.dart          # Desktop notifications
-│   │   └── settings_service.dart              # App preferences
+│   │   ├── app_service.dart                   # Main orchestrator — wires everything
+│   │   ├── clipboard_service.dart             # Clipboard monitor (500ms polling)
+│   │   ├── pairing_service.dart               # PIN-based pairing + HMAC-SHA256
+│   │   │                                      #   + HKDF session key derivation
+│   │   └── file_transfer_service.dart         # Chunked file transfer (64KB)
+│   │                                          #   + SHA-256 checksum verification
 │   │
 │   ├── models/                                # Data models
-│   │   ├── device.dart                        # Discovered device info
-│   │   ├── paired_device.dart                 # Paired desktop + shared key
-│   │   ├── web_client.dart                    # Connected mobile browser
-│   │   ├── clipboard_item.dart                # Clipboard entry
-│   │   ├── transfer_task.dart                 # Active transfer state
-│   │   └── app_settings.dart                  # User preferences
+│   │   ├── device.dart                        # Device info + PairingState enum
+│   │   ├── clipboard_item.dart                # Clipboard entry (text + timestamp)
+│   │   └── transfer_task.dart                 # Transfer state (progress, status)
 │   │
 │   ├── providers/                             # State management (Riverpod)
-│   │   ├── device_provider.dart               # Desktops + mobiles
-│   │   ├── clipboard_provider.dart            # Clipboard history & state
-│   │   ├── transfer_provider.dart             # Transfer progress & queue
-│   │   └── settings_provider.dart             # App settings
+│   │   ├── device_provider.dart               # Desktop + mobile device list
+│   │   ├── clipboard_provider.dart            # Clipboard history (max 50 items)
+│   │   ├── transfer_provider.dart             # File transfer progress tracking
+│   │   └── web_client_provider.dart           # Connected web clients
 │   │
-│   ├── screens/                               # Desktop UI screens
-│   │   ├── home/
-│   │   │   ├── home_screen.dart               # Main: devices + clipboard
-│   │   │   └── widgets/
-│   │   │       ├── device_list.dart
-│   │   │       ├── device_tile.dart
-│   │   │       └── qr_code_panel.dart         # Show QR for mobile
-│   │   ├── clipboard/
-│   │   │   ├── clipboard_screen.dart
-│   │   │   └── widgets/
-│   │   │       └── clipboard_item_tile.dart
-│   │   ├── transfer/
-│   │   │   ├── transfer_screen.dart
-│   │   │   └── widgets/
-│   │   │       └── transfer_progress.dart
-│   │   ├── pairing/
-│   │   │   └── pairing_screen.dart            # Desktop ↔ Desktop pairing
-│   │   └── settings/
-│   │       └── settings_screen.dart
+│   ├── screens/                               # Desktop UI
+│   │   └── home/
+│   │       ├── home_screen.dart               # 3 tabs: Devices, Clipboard, Files
+│   │       └── widgets/
+│   │           ├── device_list.dart           # Device list + "Connect" FAB
+│   │           ├── device_tile.dart           # Device with pairing state dot
+│   │           ├── clipboard_history.dart     # Clipboard history list
+│   │           ├── transfer_list.dart         # Transfer progress with bars
+│   │           ├── connect_dialog.dart        # IP + port input
+│   │           ├── pin_dialog.dart            # PIN display (responder) +
+│   │           │                              #   PIN input (initiator)
+│   │           └── qr_code_panel.dart         # QR code for mobile connection
 │   │
 │   └── utils/
-│       ├── constants.dart
-│       ├── logger.dart
-│       └── network_utils.dart                 # Get local IP, etc.
+│       ├── constants.dart                     # Protocol version, ports, timeouts
+│       ├── logger.dart                        # Colored log output with tags
+│       ├── network_utils.dart                 # Get local IP addresses
+│       └── mime_parser.dart                   # Multipart/form-data parser
 │
-├── web_client/                                # Mobile Web SPA (standalone)
-│   ├── index.html                             # Single HTML entry
+├── web_client/                                # Mobile Web SPA
+│   ├── index.html                             # Entry point + PIN overlay div
 │   ├── css/
-│   │   └── style.css                          # Responsive mobile-first CSS
+│   │   └── style.css                          # Mobile-first, dark/light theme
 │   ├── js/
-│   │   ├── app.js                             # Main app logic
-│   │   ├── websocket.js                       # WebSocket connection manager
-│   │   ├── clipboard.js                       # Clipboard read/write
-│   │   ├── transfer.js                        # File upload/download
-│   │   └── ui.js                              # DOM manipulation & rendering
+│   │   ├── app.js                             # Main logic + auth event wiring
+│   │   ├── auth.js                            # PIN verify + session token cache
+│   │   ├── websocket.js                       # WebSocket + auto-reconnect + token
+│   │   ├── clipboard.js                       # Clipboard read/write operations
+│   │   ├── transfer.js                        # File upload (XHR) + download
+│   │   └── ui.js                              # DOM updates + PIN overlay
 │   └── assets/
-│       ├── icons/                             # PWA icons
-│       └── manifest.json                      # PWA manifest (add to homescreen)
+│       └── manifest.json                      # PWA manifest
 │
-├── assets/                                    # Flutter desktop assets
-│   ├── icons/
-│   └── images/
-│
-├── test/                                      # Tests
-│   ├── core/
-│   ├── services/
-│   └── web_client/                            # Web client tests
+├── scripts/                                   # Build & packaging scripts
+│   ├── build-deb.sh                           # Linux .deb package builder
+│   └── build-dmg.sh                           # macOS .dmg package builder
 │
 ├── docs/
-│   └── ARCHITECTURE.md                        # This file
+│   ├── ARCHITECTURE.md                        # This file
+│   └── DEVELOPMENT-PHASES.md                  # Development roadmap & progress
 │
 ├── pubspec.yaml                               # Flutter dependencies
 ├── LICENSE                                    # MIT License
@@ -767,9 +816,9 @@ copy-paste/
 
 | Package | Fungsi |
 |---------|--------|
-| `nsd` | mDNS/DNS-SD service discovery |
+| `nsd` | mDNS/DNS-SD service discovery (macOS only) |
 | `flutter_riverpod` | State management |
-| `cryptography` | X25519, AES-256-GCM |
+| `cryptography` | HMAC-SHA256, HKDF, SHA-256 (future: X25519, AES-256-GCM) |
 | `file_picker` | Pilih file untuk transfer |
 | `path_provider` | Lokasi save file |
 | `qr_flutter` | Generate QR code untuk mobile connection |
@@ -778,9 +827,8 @@ copy-paste/
 | `freezed` | Immutable data classes |
 | `json_serializable` | JSON serialization |
 | `local_notifier` | Desktop notifications |
-| `system_tray` | System tray / menu bar |
-| `window_manager` | Window control (minimize to tray) |
-| `shelf` | HTTP server framework (atau dart:io langsung) |
+| `window_manager` | Window control |
+| `shelf` | HTTP server framework |
 | `shelf_web_socket` | WebSocket support untuk shelf |
 
 ### Web Client (Mobile SPA)
@@ -788,14 +836,25 @@ copy-paste/
 | Teknologi | Detail |
 |-----------|--------|
 | Vanilla JavaScript | Tanpa framework — fast load, zero build step |
-| HTML5 | Semantic HTML, responsive |
-| CSS3 | Mobile-first, minimal, dark/light theme |
+| HTML5 | Semantic HTML, responsive, PIN overlay |
+| CSS3 | Mobile-first, minimal, dark/light theme (`prefers-color-scheme`) |
 | Clipboard API | `navigator.clipboard.readText()` / `writeText()` |
-| WebSocket API | Native browser WebSocket |
-| File API | `<input type="file">` + `fetch()` upload |
-| PWA | `manifest.json` + service worker (optional, untuk add-to-homescreen) |
+| WebSocket API | Native browser WebSocket + auto-reconnect |
+| File API | `<input type="file">` + XHR upload with progress |
+| localStorage | Session token caching (`cp_session_token`) |
+| PWA | `manifest.json` (add-to-homescreen support) |
 
-**Total web client target size: < 50KB** (tanpa framework, tanpa build tool).
+**Web client modules:**
+| File | Fungsi |
+|------|--------|
+| `app.js` | Main logic, event wiring, auth event handling |
+| `auth.js` | PIN verification, HMAC fallback, session token management |
+| `websocket.js` | WebSocket connection + auto-reconnect + token param |
+| `clipboard.js` | Clipboard read/write operations |
+| `transfer.js` | File upload (XHR with progress) + download |
+| `ui.js` | DOM manipulation, PIN overlay, status updates |
+
+**Total web client size: < 50KB** (tanpa framework, tanpa build tool).
 
 ---
 
@@ -814,27 +873,46 @@ copy-paste/
 
 ### Authentication Flow
 
-**Desktop ↔ Desktop:**
-- Explicit pairing via 6-digit PIN
-- X25519 key exchange → persistent shared key
-- Mutual authentication setiap connection
+**Desktop ↔ Desktop (Implemented):**
+1. Initiator sends `pairRequest` with device info
+2. Responder generates 6-digit PIN + random nonce, shows PIN to user
+3. Responder sends `pairChallenge(nonce)` to initiator
+4. User enters PIN on initiator device
+5. Initiator computes `HMAC-SHA256(PIN, nonce)` and pre-derives session key via `HKDF-SHA256(PIN + nonce)`
+6. Initiator sends `pairResponse(hmac)` to responder
+7. Responder verifies HMAC, derives same session key
+8. Responder sends `pairConfirm(success)` → paired!
+9. All subsequent messages include HMAC authentication using session key
 
-**Desktop ↔ Mobile (Web):**
-- QR code berisi: `https://<ip>:<port>?token=<one-time-token>`
-- Token expire setelah 5 menit atau first use
-- Setelah connect: issue session token → localStorage
-- Session valid selama configurable duration (default: 24 jam)
-- Desktop UI bisa revoke session kapan saja
+**Desktop ↔ Mobile Web (Implemented):**
+1. Mobile connects via WebSocket (QR code URL)
+2. Server generates 6-digit PIN + nonce, sends `auth:challenge` event
+3. Desktop shows PIN to user via dialog
+4. User enters PIN on mobile browser
+5. Mobile sends PIN directly (fallback for HTTP — Web Crypto unavailable)
+6. Server verifies PIN match → generates session token
+7. Server sends `auth:success` with session token
+8. Mobile saves token to `localStorage` key `cp_session_token`
+9. On reconnect: token sent via WebSocket query param `?token=...`
+10. Server validates token → auto-authenticates (no PIN re-entry)
 
-### Key Management
+### Key Management (Current)
 
-- Desktop keypair di-generate saat pertama kali run
-- Private key disimpan di OS secure storage:
+- Session keys derived via HKDF-SHA256 (PIN + nonce as input)
+- Session keys stored in-memory only (lost on app restart)
+- Session tokens stored in server-side Set (in-memory)
+- Mobile tokens cached in browser localStorage
+
+### Key Management (Planned — Phase 5)
+
+- Desktop keypair via X25519 ECDH for forward secrecy
+- AES-256-GCM encryption on all TCP messages
+- Persistent key storage:
   - macOS: Keychain
   - Linux: libsecret / encrypted file
   - Windows (v2): DPAPI / Windows Credential Store
-- Self-signed TLS cert untuk HTTPS web server
-- Session tokens: random 256-bit, stored in-memory + hashed di disk
+- Self-signed TLS for HTTPS web server
+- Session token expiry + revocation
 
 ---
 
@@ -847,13 +925,14 @@ copy-paste/
 - App Sandbox: `com.apple.security.network.server` entitlement
 - Menu bar icon untuk quick access
 - Clipboard: `NSPasteboard` + polling (`changeCount`)
-- Notarization required untuk distribusi
+- Distribusi: .dmg package (`scripts/build-dmg.sh`) dengan code signing
+- Notarization required untuk distribusi publik
 
 #### Linux
 - mDNS: `avahi-daemon` harus terinstall
 - Clipboard: X11 (`xclip`/`xsel`) dan Wayland (`wl-clipboard`)
 - System tray: `StatusNotifierItem` / `AppIndicator`
-- Distribusi: AppImage, Flatpak, atau .deb
+- Distribusi: .deb package (`scripts/build-deb.sh`), future: AppImage, Flatpak
 
 #### Windows (v2 - Future)
 - Firewall: prompt untuk allow incoming TCP + HTTP connection
