@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'services/app_service.dart';
 import 'screens/home/home_screen.dart';
@@ -46,12 +48,29 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> {
     _startServices();
   }
 
+  Future<String> _extractWebClient() async {
+    final supportDir = await getApplicationSupportDirectory();
+    final webClientDir = Directory('${supportDir.path}/web_client');
+
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    final webAssets = manifest.listAssets()
+        .where((k) => k.startsWith('web_client/'))
+        .toList();
+
+    for (final assetKey in webAssets) {
+      final relativePath = assetKey.replaceFirst('web_client/', '');
+      final file = File('${webClientDir.path}/$relativePath');
+      await file.parent.create(recursive: true);
+      final data = await rootBundle.load(assetKey);
+      await file.writeAsBytes(data.buffer.asUint8List());
+    }
+
+    return webClientDir.path;
+  }
+
   Future<void> _startServices() async {
     final appService = ref.read(appServiceProvider);
-
-    // In debug, serve web_client from project root.
-    final projectDir = Directory.current.path;
-    final webClientPath = '$projectDir/web_client';
+    final webClientPath = await _extractWebClient();
 
     try {
       debugPrint('[CopyPaste] web_client path: $webClientPath');

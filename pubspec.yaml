@@ -52,3 +52,6 @@ flutter:
     - assets/icons/
     - assets/images/
     - web_client/
+    - web_client/css/
+    - web_client/js/
+    - web_client/assets/
