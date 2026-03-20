@@ -72,6 +72,13 @@ class DeviceTile extends StatelessWidget {
 
   Widget? _buildTrailing(BuildContext context) {
     if (device.platform == 'browser') {
+      if (onDisconnect != null) {
+        return IconButton(
+          icon: const Icon(Icons.close, size: 20),
+          tooltip: 'Disconnect',
+          onPressed: () => onDisconnect?.call(device.id),
+        );
+      }
       return const Icon(Icons.open_in_browser, size: 20);
     }
 

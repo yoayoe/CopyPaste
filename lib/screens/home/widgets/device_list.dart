@@ -5,11 +5,13 @@ import 'device_tile.dart';
 class DeviceList extends StatelessWidget {
   final List<Device> devices;
   final VoidCallback? onConnectPressed;
+  final void Function(String deviceId)? onDisconnect;
 
   const DeviceList({
     super.key,
     required this.devices,
     this.onConnectPressed,
+    this.onDisconnect,
   });
 
   @override
@@ -45,7 +47,10 @@ class DeviceList extends StatelessWidget {
           ListView.builder(
             padding: const EdgeInsets.only(left: 8, right: 8, top: 8, bottom: 80),
             itemCount: devices.length,
-            itemBuilder: (context, index) => DeviceTile(device: devices[index]),
+            itemBuilder: (context, index) => DeviceTile(
+              device: devices[index],
+              onDisconnect: onDisconnect,
+            ),
           ),
         if (devices.isNotEmpty)
           Positioned(

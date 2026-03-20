@@ -106,9 +106,31 @@ const Auth = (() => {
     UI.setPinError(data.message || 'Invalid PIN');
   }
 
+  /**
+   * Handle auth:revoked from server (disconnected or expired).
+   */
+  function handleRevoked(data) {
+    const reason = data.reason || 'revoked';
+    console.log('[Auth] Session revoked:', reason);
+    _authenticated = false;
+    _nonce = null;
+    localStorage.removeItem('cp_session_token');
+
+    if (reason === 'expired') {
+      UI.toast('Session expired — please re-enter PIN');
+    } else if (reason === 'max_sessions') {
+      UI.toast('Too many sessions — disconnected');
+    } else {
+      UI.toast('Disconnected by desktop');
+    }
+
+    UI.showPinOverlay();
+    UI.setConnectionStatus(false);
+  }
+
   function isAuthenticated() {
     return _authenticated;
   }
 
-  return { handleChallenge, submitPin, handleSuccess, handleFailed, isAuthenticated };
+  return { handleChallenge, submitPin, handleSuccess, handleFailed, handleRevoked, isAuthenticated };
 })();

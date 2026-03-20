@@ -37,6 +37,7 @@ const App = (() => {
     WS.on('auth:challenge', (data) => Auth.handleChallenge(data));
     WS.on('auth:success', (data) => Auth.handleSuccess(data));
     WS.on('auth:failed', (data) => Auth.handleFailed(data));
+    WS.on('auth:revoked', (data) => Auth.handleRevoked(data));
     WS.on('auth:required', () => UI.toast('Please enter PIN first'));
 
     // Clipboard events from desktop.

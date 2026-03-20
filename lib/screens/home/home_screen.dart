@@ -60,10 +60,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Build combined device list: discovered desktops + paired desktops + web clients.
     final allDevices = <Device>[...devices];
-    for (var i = 0; i < webClients.length; i++) {
-      final client = webClients[i];
+    for (final client in webClients) {
       allDevices.add(Device(
-        id: 'web-client-$i',
+        id: client.sessionToken ?? 'web-${client.ip}',
         name: client.name,
         platform: 'browser',
         ip: client.ip,
@@ -124,6 +123,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           DeviceList(
             devices: allDevices,
             onConnectPressed: ready ? () => _showConnectDialog(context) : null,
+            onDisconnect: ready ? (deviceId) => _disconnectDevice(deviceId) : null,
           ),
           ClipboardHistory(items: clipboardItems),
           TransferList(transfers: transfers),
@@ -189,8 +189,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     };
 
     appService.onWebClientsChanged = (clients) {
-      ref.read(webClientsProvider.notifier).state = clients
-          .map((c) => WebClientState(name: c.name, ip: c.ip))
+      // Use session info for richer client state.
+      final sessions = appService.webClientSessions;
+      ref.read(webClientsProvider.notifier).state = sessions
+          .map((s) => WebClientState(
+                name: s.clientName,
+                ip: s.clientIp,
+                sessionToken: s.token,
+                connectedAt: s.createdAt,
+                lastSeenAt: s.lastSeenAt,
+              ))
           .toList();
     };
 
@@ -262,6 +270,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         SnackBar(content: Text('Transfer failed: ${task.filename}')),
       );
     };
+  }
+
+  void _disconnectDevice(String deviceId) {
+    final appService = ref.read(appServiceProvider);
+    // Web client sessions use the token as device ID.
+    final webClients = ref.read(webClientsProvider);
+    final isWebClient = webClients.any((c) => c.sessionToken == deviceId);
+    if (isWebClient) {
+      appService.revokeWebClientSession(deviceId);
+    } else {
+      appService.disconnectPeer(deviceId);
+    }
   }
 
   Future<void> _pickAndSendFile(BuildContext context) async {

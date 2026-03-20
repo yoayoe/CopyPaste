@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
+import '../../models/session_info.dart';
 import '../../utils/logger.dart';
 import '../../utils/mime_parser.dart';
 
@@ -14,6 +15,7 @@ class WebClientInfo {
   final String ip;
   String name;
   bool authenticated;
+  String? sessionToken;
   String? _pin;
   String? _nonce;
 
@@ -33,8 +35,15 @@ class EmbeddedWebServer {
   final StreamController<Map<String, dynamic>> _incomingMessages =
       StreamController.broadcast();
 
-  /// Valid session tokens (survive reconnect/refresh).
-  final Set<String> _sessionTokens = {};
+  /// Active sessions keyed by token.
+  final Map<String, SessionInfo> _sessions = {};
+
+  /// Session configuration.
+  Duration sessionMaxAge = const Duration(hours: 24);
+  int maxSessions = 10;
+
+  /// Periodic cleanup timer.
+  Timer? _cleanupTimer;
 
   /// Received files stored temporarily for download. fileId → (path, filename, checksum).
   final Map<String, ({String path, String filename, String checksum})> _receivedFiles = {};
@@ -68,6 +77,10 @@ class EmbeddedWebServer {
   int get port => _server?.port ?? 0;
   bool get isRunning => _server != null;
 
+  /// Non-expired active sessions.
+  List<SessionInfo> get activeSessions =>
+      _sessions.values.where((s) => !s.isExpired(sessionMaxAge)).toList();
+
   EmbeddedWebServer({required this.webClientPath});
 
   /// Start the HTTP + WebSocket server.
@@ -76,6 +89,12 @@ class EmbeddedWebServer {
     Log.i(_tag, 'Listening on port ${_server!.port}');
 
     _server!.listen(_handleRequest);
+
+    // Periodic cleanup of expired sessions.
+    _cleanupTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+      _cleanupExpiredSessions();
+    });
+
     return _server!.port;
   }
 
@@ -117,7 +136,14 @@ class EmbeddedWebServer {
 
     // Check for session token in query params (reconnect/refresh).
     final token = request.uri.queryParameters['token'];
-    final hasValidToken = token != null && token.isNotEmpty && _sessionTokens.contains(token);
+    final session = (token != null && token.isNotEmpty) ? _sessions[token] : null;
+    final hasValidToken = session != null && !session.isExpired(sessionMaxAge);
+
+    // If token exists but expired, remove it.
+    if (session != null && session.isExpired(sessionMaxAge)) {
+      _sessions.remove(token);
+      Log.i(_tag, 'Expired session token from $clientIp');
+    }
 
     final clientInfo = WebClientInfo(
       socket: socket,
@@ -130,7 +156,9 @@ class EmbeddedWebServer {
         '(${hasValidToken ? "has token" : "new"}, ${_connectedClients.length} clients)');
 
     if (hasValidToken) {
-      // Already authenticated via session token — send success immediately.
+      // Already authenticated via session token — update last seen.
+      session.lastSeenAt = DateTime.now();
+      clientInfo.sessionToken = token;
       _sendToClient(clientInfo, 'auth:success', {'message': 'Session restored'});
       onClientChanged?.call(_connectedClients);
     } else {
@@ -230,16 +258,77 @@ class EmbeddedWebServer {
     client._pin = null;
     client._nonce = null;
 
-    final sessionToken = _generateSessionToken();
-    _sessionTokens.add(sessionToken);
+    // Enforce max sessions — evict oldest if at limit.
+    if (_sessions.length >= maxSessions) {
+      final oldest = _sessions.entries
+          .reduce((a, b) => a.value.lastSeenAt.isBefore(b.value.lastSeenAt) ? a : b);
+      _revokeSession(oldest.key, reason: 'max_sessions');
+    }
 
-    Log.i(_tag, 'Client authenticated: ${client.name} (${client.ip})');
+    final sessionToken = _generateSessionToken();
+    client.sessionToken = sessionToken;
+    _sessions[sessionToken] = SessionInfo(
+      token: sessionToken,
+      clientName: client.name,
+      clientIp: client.ip,
+      createdAt: DateTime.now(),
+    );
+
+    Log.i(_tag, 'Client authenticated: ${client.name} (${client.ip}) '
+        '(${_sessions.length} sessions)');
     _sendToClient(client, 'auth:success', {
       'message': 'Authenticated',
       'sessionToken': sessionToken,
     });
     onClientAuthenticated?.call(client.ip, client.name);
     onClientChanged?.call(_connectedClients);
+  }
+
+  /// Revoke a specific session by token.
+  void revokeSession(String token) {
+    _revokeSession(token, reason: 'revoked');
+  }
+
+  /// Revoke all sessions.
+  void revokeAllSessions() {
+    final tokens = _sessions.keys.toList();
+    for (final token in tokens) {
+      _revokeSession(token, reason: 'revoked');
+    }
+  }
+
+  void _revokeSession(String token, {String reason = 'revoked'}) {
+    final session = _sessions.remove(token);
+    if (session == null) return;
+
+    Log.i(_tag, 'Session revoked: ${session.clientName} (${session.clientIp}), reason: $reason');
+
+    // Find connected client with this token and disconnect.
+    final client = _connectedClients
+        .where((c) => c.sessionToken == token)
+        .firstOrNull;
+    if (client != null) {
+      _sendToClient(client, 'auth:revoked', {'reason': reason});
+      client.authenticated = false;
+      client.sessionToken = null;
+      try { client.socket.close(); } catch (_) {}
+      _connectedClients.remove(client);
+    }
+
+    onClientChanged?.call(_connectedClients);
+  }
+
+  void _cleanupExpiredSessions() {
+    final expired = _sessions.entries
+        .where((e) => e.value.isExpired(sessionMaxAge))
+        .map((e) => e.key)
+        .toList();
+    for (final token in expired) {
+      _revokeSession(token, reason: 'expired');
+    }
+    if (expired.isNotEmpty) {
+      Log.i(_tag, 'Cleaned up ${expired.length} expired sessions');
+    }
   }
 
   void _sendToClient(WebClientInfo client, String event, Map<String, dynamic> data) {
@@ -464,10 +553,13 @@ class EmbeddedWebServer {
   }
 
   Future<void> stop() async {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = null;
     for (final client in _connectedClients.toList()) {
       await client.socket.close();
     }
     _connectedClients.clear();
+    _sessions.clear();
     await _server?.close();
     _server = null;
     await _incomingMessages.close();

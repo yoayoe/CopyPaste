@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../core/discovery/discovery_service.dart';
 import '../core/network/tcp_server.dart';
 import '../core/web_server/http_server.dart';
+import '../models/session_info.dart';
 import '../models/transfer_task.dart';
 import '../services/clipboard_service.dart';
 import '../services/file_transfer_service.dart';
@@ -262,6 +263,15 @@ class AppService {
   Future<void> disconnectPeer(String deviceId) async {
     await pairingService.disconnectPeer(deviceId);
   }
+
+  /// Active web client sessions.
+  List<SessionInfo> get webClientSessions => webServer.activeSessions;
+
+  /// Revoke a specific web client session.
+  void revokeWebClientSession(String token) => webServer.revokeSession(token);
+
+  /// Revoke all web client sessions.
+  void revokeAllWebClientSessions() => webServer.revokeAllSessions();
 
   /// Send a file to a paired desktop.
   Future<void> sendFileToPeer(String filePath, String deviceId) async {
