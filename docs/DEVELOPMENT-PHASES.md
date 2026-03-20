@@ -47,6 +47,17 @@
 - Static files di-serve dengan no-cache header (development)
 - Dark/light theme mengikuti system preference (CSS `prefers-color-scheme`)
 
+#### Phase 3.5: macOS Build & Test
+- [ ] Generate macOS platform files (`flutter create --platforms macos .`)
+- [ ] Configure macOS entitlements (network.server, network.client)
+- [ ] Tambah Bonjour service declaration di Info.plist (`_copypaste._tcp`)
+- [ ] Tambah `NSLocalNetworkUsageDescription` di Info.plist
+- [ ] Fix dependency/compatibility issues untuk macOS
+- [ ] Test mDNS discovery (advertise + browse) di macOS
+- [ ] Test web server + QR code + mobile browser access
+- [ ] Test clipboard sync (desktop ↔ mobile browser)
+- [ ] Build release: `flutter build macos`
+
 #### Phase 4: File Transfer
 - [ ] Desktop ↔ Desktop: chunked file transfer via TCP
 - [ ] Mobile → Desktop: file upload via HTTP multipart
