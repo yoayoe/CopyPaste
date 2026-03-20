@@ -96,20 +96,32 @@ const UI = (() => {
       return;
     }
 
-    container.innerHTML = transfers.map(t => `
+    container.innerHTML = transfers.map(t => {
+      const hasDownload = t.downloadId && t.status === 'completed';
+      const statusLabel = t.status === 'inProgress' ? 'Transferring...'
+        : t.status === 'completed' ? '✓ Completed'
+        : t.status === 'failed' ? '✗ Failed'
+        : t.status;
+
+      return `
       <div class="history-item">
-        <div class="content">${escapeHtml(t.filename)} (${formatSize(t.totalBytes)})</div>
+        <div class="content">${escapeHtml(t.filename)}${t.totalBytes ? ' (' + formatSize(t.totalBytes) + ')' : ''}</div>
         <div class="meta">
-          <span>${t.direction === 'send' ? 'Sending to' : 'From'} ${escapeHtml(t.deviceName)}</span>
-          <span>${t.status}</span>
+          <span>${t.direction === 'send' ? 'Sent to' : 'From'} ${escapeHtml(t.deviceName || 'Desktop')}</span>
+          <span>${statusLabel}</span>
         </div>
         ${t.status === 'inProgress' ? `
           <div class="progress-bar">
-            <div class="fill" style="width: ${(t.progress * 100).toFixed(1)}%"></div>
+            <div class="fill" style="width: ${((t.progress || 0) * 100).toFixed(1)}%"></div>
           </div>
         ` : ''}
-      </div>
-    `).join('');
+        ${hasDownload ? `
+          <button class="btn primary download-btn" onclick="App.downloadFile('${t.downloadId}', '${escapeHtml(t.filename)}')">
+            Download
+          </button>
+        ` : ''}
+      </div>`;
+    }).join('');
   }
 
   function toast(message) {

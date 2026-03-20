@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
@@ -62,6 +63,11 @@ class AppService {
   void Function(TransferTask task, String filePath)? onTransferComplete;
   void Function(TransferTask task, String error)? onTransferFailed;
 
+  /// Stream-based transfer updates (more reliable than callbacks).
+  final StreamController<TransferTask> _transferStream =
+      StreamController<TransferTask>.broadcast();
+  Stream<TransferTask> get transferStream => _transferStream.stream;
+
   AppService();
 
   Future<void> start(String webClientPath) async {
@@ -125,8 +131,8 @@ class AppService {
     _wireFileTransferCallbacks();
 
     // Wire file upload from mobile.
-    webServer.onFileUploaded = (fileId, filename, size, checksum) {
-      Log.i(_tag, 'File uploaded from mobile: $filename ($size bytes)');
+    webServer.onFileUploaded = (fileId, filename, size, checksum, savedPath) {
+      Log.i(_tag, 'File uploaded from mobile: $filename ($size bytes) → $savedPath');
       final task = TransferTask(
         id: fileId,
         filename: filename,
@@ -138,8 +144,20 @@ class AppService {
         deviceId: 'mobile',
         deviceName: 'Mobile Browser',
         startedAt: DateTime.now(),
+        filePath: savedPath,
       );
-      onTransferComplete?.call(task, '');
+      _transferStream.add(task);
+      onTransferComplete?.call(task, savedPath);
+
+      // Also make the uploaded file available for other mobile clients to download.
+      final downloadId = webServer.addFileForDownload(savedPath, filename, checksum);
+      webServer.broadcast('transfer:complete', {
+        'id': downloadId,
+        'downloadId': downloadId,
+        'filename': filename,
+        'size': size,
+        'status': 'completed',
+      });
     };
 
     // 6. Start mDNS discovery (macOS only — nsd plugin doesn't support Linux).
@@ -268,10 +286,15 @@ class AppService {
 
   void _wireFileTransferCallbacks() {
     fileTransfer.onTransferProgress = (task) {
+      _transferStream.add(task);
       onTransferProgress?.call(task);
     };
     fileTransfer.onTransferComplete = (task, path) {
-      onTransferComplete?.call(task, path);
+      final updatedTask = task.filePath != null && task.filePath!.isNotEmpty
+          ? task
+          : task.copyWith(filePath: path);
+      _transferStream.add(updatedTask);
+      onTransferComplete?.call(updatedTask, path);
 
       // Register received files for mobile download.
       if (task.direction == TransferDirection.receive && path.isNotEmpty) {
@@ -287,6 +310,8 @@ class AppService {
       }
     };
     fileTransfer.onTransferFailed = (task, error) {
+      final failedTask = task.copyWith(status: TransferStatus.failed, error: error);
+      _transferStream.add(failedTask);
       onTransferFailed?.call(task, error);
     };
   }
@@ -396,6 +421,7 @@ class AppService {
   Future<void> stop() async {
     clipboard.dispose();
     fileTransfer.dispose();
+    await _transferStream.close();
     await pairingService.disconnectAll();
     await discovery?.dispose();
     await tcpServer.stop();

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../main.dart';
 import '../../models/device.dart';
+import '../../models/transfer_task.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/clipboard_provider.dart';
 import '../../providers/transfer_provider.dart';
@@ -24,6 +26,22 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedTab = 0;
   bool _callbacksWired = false;
+  StreamSubscription<dynamic>? _transferSub;
+
+  @override
+  void dispose() {
+    _transferSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenTransferStream() {
+    final appService = ref.read(appServiceProvider);
+    _transferSub?.cancel();
+    _transferSub = appService.transferStream.listen((task) {
+      if (!mounted) return;
+      ref.read(transferProvider.notifier).addOrUpdate(task);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +53,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     if (ready && !_callbacksWired) {
       _callbacksWired = true;
+      // Listen to transfer stream immediately — no frame delay.
+      _listenTransferStream();
       WidgetsBinding.instance.addPostFrameCallback((_) => _wireCallbacks());
     }
 
@@ -219,22 +239,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _showMobilePinDialog(clientIp, clientName, pin);
     };
 
-    // File transfer callbacks.
-    appService.onTransferProgress = (task) {
-      ref.read(transferProvider.notifier).addOrUpdate(task);
-    };
+    // File transfer callbacks — only for snackbar notifications.
+    // The actual provider updates happen via transferStream listener above.
     appService.onTransferComplete = (task, path) {
-      // Ensure filePath is set on the task.
-      final updatedTask = task.filePath != null && task.filePath!.isNotEmpty
-          ? task
-          : task.copyWith(filePath: path);
-      ref.read(transferProvider.notifier).addOrUpdate(updatedTask);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${task.direction.name == 'receive' ? 'Received' : 'Sent'}: ${task.filename}')),
+        SnackBar(content: Text('${task.direction == TransferDirection.receive ? 'Received' : 'Sent'}: ${task.filename}')),
       );
     };
     appService.onTransferFailed = (task, error) {
-      ref.read(transferProvider.notifier).addOrUpdate(task);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Transfer failed: ${task.filename}')),
       );

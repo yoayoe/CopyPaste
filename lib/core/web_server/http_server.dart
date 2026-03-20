@@ -43,7 +43,7 @@ class EmbeddedWebServer {
   String? _downloadDir;
 
   /// Called when a file is uploaded from mobile.
-  void Function(String fileId, String filename, int size, String checksum)? onFileUploaded;
+  void Function(String fileId, String filename, int size, String checksum, String savedPath)? onFileUploaded;
 
   /// Called when a web client connects or disconnects.
   void Function(List<WebClientInfo> clients)? onClientChanged;
@@ -313,21 +313,13 @@ class EmbeddedWebServer {
         _receivedFiles[fileId] = (path: savePath, filename: filename, checksum: checksum);
         Log.i(_tag, 'File uploaded: $filename ($totalBytes bytes, id: $fileId)');
 
-        onFileUploaded?.call(fileId, filename, totalBytes, checksum);
-
-        // Notify web clients about the received file.
-        broadcast('transfer:complete', {
-          'id': fileId,
-          'filename': filename,
-          'size': totalBytes,
-          'checksum': checksum,
-          'status': 'completed',
-        });
+        onFileUploaded?.call(fileId, filename, totalBytes, checksum, savePath);
 
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({
           'status': 'ok',
           'fileId': fileId,
+          'downloadId': fileId,
           'filename': filename,
           'size': totalBytes,
           'checksum': checksum,

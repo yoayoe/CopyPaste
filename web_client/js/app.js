@@ -90,11 +90,26 @@ const App = (() => {
 
     WS.on('transfer:complete', (data) => {
       const idx = transfers.findIndex(t => t.id === data.id);
-      if (idx >= 0) transfers[idx].status = 'completed';
+      if (idx >= 0) {
+        transfers[idx] = { ...transfers[idx], ...data, status: 'completed' };
+      } else {
+        // New file from desktop — add to transfer list.
+        transfers.unshift({
+          id: data.id,
+          filename: data.filename,
+          totalBytes: data.size || 0,
+          progress: 1,
+          status: 'completed',
+          direction: 'receive',
+          deviceName: data.deviceName || 'Desktop',
+          downloadId: data.downloadId || data.id,
+        });
+      }
       UI.renderTransferList(transfers);
 
-      if (data.downloadId) {
-        Transfer.download(data.downloadId, data.filename);
+      // Show toast notification.
+      if (data.filename) {
+        UI.toast(`File available: ${data.filename}`);
       }
     });
 
@@ -174,7 +189,7 @@ const App = (() => {
       UI.renderTransferList(transfers);
 
       try {
-        await Transfer.upload(file, (progress) => {
+        const result = await Transfer.upload(file, (progress) => {
           const idx = transfers.findIndex(t => t.id === transferId);
           if (idx >= 0) {
             transfers[idx].progress = progress;
@@ -183,7 +198,13 @@ const App = (() => {
         });
 
         const idx = transfers.findIndex(t => t.id === transferId);
-        if (idx >= 0) transfers[idx].status = 'completed';
+        if (idx >= 0) {
+          transfers[idx].status = 'completed';
+          // Save downloadId from server response so file can be re-downloaded.
+          if (result && result.downloadId) {
+            transfers[idx].downloadId = result.downloadId;
+          }
+        }
         UI.renderTransferList(transfers);
         UI.toast(`Sent: ${file.name}`);
       } catch (e) {
@@ -204,6 +225,10 @@ const App = (() => {
         UI.toast(ok ? 'Copied!' : 'Copy failed');
       });
     }
+  }
+
+  function downloadFile(downloadId, filename) {
+    Transfer.download(downloadId, filename);
   }
 
   function formatSize(bytes) {
@@ -234,7 +259,7 @@ const App = (() => {
   }
 
   // Expose for onclick handlers in HTML.
-  return { init, copyItem };
+  return { init, copyItem, downloadFile };
 })();
 
 document.addEventListener('DOMContentLoaded', App.init);

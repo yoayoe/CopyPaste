@@ -388,3 +388,13 @@ h2 {
 .shake {
   animation: shake 0.4s ease;
 }
+
+/* Download button in transfer list */
+.download-btn {
+  margin-top: 8px;
+  flex: none;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
