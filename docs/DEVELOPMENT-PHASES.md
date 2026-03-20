@@ -93,7 +93,7 @@
 - [x] Desktop ↔ Mobile: PIN-based authentication + session token ✅
 - [ ] Desktop ↔ Desktop: upgrade to X25519 key exchange + AES-256-GCM (optional)
 - [ ] Desktop ↔ Mobile: self-signed TLS (HTTPS + WSS)
-- [ ] Session management + token expiry + revocation
+- [x] Session management + token expiry + revocation
 - [ ] Secure key storage (macOS Keychain, Linux libsecret)
 
 **Catatan Phase 5:**

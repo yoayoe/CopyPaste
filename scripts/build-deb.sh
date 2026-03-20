@@ -79,14 +79,8 @@ Keywords=clipboard;copy;paste;transfer;sync;
 StartupNotify=true
 EOF
 
-# Create a simple SVG icon (placeholder — replace with actual icon later)
-cat > "$DEB_DIR/usr/share/icons/hicolor/256x256/apps/$APP_NAME.svg" << 'SVG'
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect width="256" height="256" rx="48" fill="#2563eb"/>
-  <text x="128" y="160" font-family="Arial,sans-serif" font-size="120" font-weight="bold"
-        fill="white" text-anchor="middle">CP</text>
-</svg>
-SVG
+# Copy app icon
+cp "$PROJECT_DIR/linux/icons/copypaste.png" "$DEB_DIR/usr/share/icons/hicolor/256x256/apps/$APP_NAME.png"
 
 # Create copyright doc
 cat > "$DEB_DIR/usr/share/doc/$APP_NAME/copyright" << EOF
