@@ -1,17 +1,17 @@
 import 'dart:io';
-import 'dart:typed_data';
-import '../protocol/header.dart';
-import '../protocol/message.dart';
 import '../../utils/logger.dart';
 
 const _tag = 'TcpServer';
 
-/// TCP server that listens for incoming messages from other desktop devices.
+/// TCP server that listens for incoming connections from other desktop devices.
+/// Hands off sockets to the PairingService for persistent connections.
 class TcpServer {
   ServerSocket? _server;
-  final void Function(Message message, String remoteIp)? onMessage;
 
-  TcpServer({this.onMessage});
+  /// Called when a new socket connects. The receiver owns the socket lifecycle.
+  final void Function(Socket socket)? onConnection;
+
+  TcpServer({this.onConnection});
 
   int get port => _server?.port ?? 0;
   bool get isRunning => _server != null;
@@ -28,32 +28,7 @@ class TcpServer {
   void _handleConnection(Socket socket) {
     final remoteIp = socket.remoteAddress.address;
     Log.d(_tag, 'Connection from $remoteIp:${socket.remotePort}');
-
-    final chunks = <int>[];
-
-    socket.listen(
-      (data) {
-        chunks.addAll(data);
-        _tryParseMessage(Uint8List.fromList(chunks), remoteIp);
-      },
-      onDone: () {
-        if (chunks.isNotEmpty) {
-          _tryParseMessage(Uint8List.fromList(chunks), remoteIp);
-        }
-        socket.close();
-      },
-      onError: (error) {
-        Log.e(_tag, 'Socket error from $remoteIp', error);
-        socket.close();
-      },
-    );
-  }
-
-  void _tryParseMessage(Uint8List bytes, String remoteIp) {
-    final message = Message.fromBytes(bytes);
-    if (message != null) {
-      onMessage?.call(message, remoteIp);
-    }
+    onConnection?.call(socket);
   }
 
   Future<void> stop() async {

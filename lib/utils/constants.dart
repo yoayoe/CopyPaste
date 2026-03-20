@@ -2,7 +2,7 @@
 const kServiceType = '_copypaste._tcp';
 
 /// Protocol version for binary messages.
-const kProtocolVersion = 1;
+const kProtocolVersion = 2;
 
 /// Magic bytes for binary protocol header (0x43 = 'C', 0x50 = 'P').
 const kMagicByte1 = 0x43;

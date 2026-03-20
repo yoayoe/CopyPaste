@@ -6,7 +6,8 @@
       "Read(//home/yoayoe/snap/**)",
       "Read(//opt/**)",
       "Read(//home/yoayoe/**)",
-      "Bash(/snap/bin/flutter create:*)"
+      "Bash(/snap/bin/flutter create:*)",
+      "Bash(/home/yoayoe/flutter/bin/flutter analyze:*)"
     ]
   }
 }

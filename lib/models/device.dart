@@ -1,3 +1,5 @@
+enum PairingState { discovered, pairing, paired, disconnected }
+
 class Device {
   final String id;
   final String name;
@@ -6,6 +8,7 @@ class Device {
   final int tcpPort;
   final int webPort;
   final int protocolVersion;
+  final PairingState pairingState;
 
   const Device({
     required this.id,
@@ -15,7 +18,29 @@ class Device {
     required this.tcpPort,
     required this.webPort,
     required this.protocolVersion,
+    this.pairingState = PairingState.discovered,
   });
+
+  Device copyWith({
+    String? id,
+    String? name,
+    String? platform,
+    String? ip,
+    int? tcpPort,
+    int? webPort,
+    int? protocolVersion,
+    PairingState? pairingState,
+  }) =>
+      Device(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        platform: platform ?? this.platform,
+        ip: ip ?? this.ip,
+        tcpPort: tcpPort ?? this.tcpPort,
+        webPort: webPort ?? this.webPort,
+        protocolVersion: protocolVersion ?? this.protocolVersion,
+        pairingState: pairingState ?? this.pairingState,
+      );
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -25,6 +50,7 @@ class Device {
         'tcpPort': tcpPort,
         'webPort': webPort,
         'protocolVersion': protocolVersion,
+        'pairingState': pairingState.name,
       };
 
   factory Device.fromJson(Map<String, dynamic> json) => Device(
@@ -35,6 +61,8 @@ class Device {
         tcpPort: json['tcpPort'] as int,
         webPort: json['webPort'] as int,
         protocolVersion: json['protocolVersion'] as int,
+        pairingState: PairingState.values.byName(
+            json['pairingState'] as String? ?? 'discovered'),
       );
 
   @override
@@ -45,5 +73,5 @@ class Device {
   int get hashCode => id.hashCode;
 
   @override
-  String toString() => 'Device($name, $platform, $ip:$tcpPort)';
+  String toString() => 'Device($name, $platform, $ip:$tcpPort, $pairingState)';
 }

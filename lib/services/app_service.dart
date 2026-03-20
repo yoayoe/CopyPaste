@@ -5,6 +5,7 @@ import '../core/discovery/discovery_service.dart';
 import '../core/network/tcp_server.dart';
 import '../core/web_server/http_server.dart';
 import '../services/clipboard_service.dart';
+import '../services/pairing_service.dart';
 import '../utils/constants.dart';
 import '../utils/logger.dart';
 import '../utils/network_utils.dart';
@@ -21,22 +22,34 @@ class AppService {
   late final TcpServer tcpServer;
   late final EmbeddedWebServer webServer;
   late final ClipboardService clipboard;
+  late final PairingService pairingService;
 
   String get deviceId => _deviceId;
+  String get deviceName => _deviceName;
   String get webUrl => 'http://$localIp:${webServer.port}';
+  int get tcpPort => tcpServer.port;
   String localIp = '127.0.0.1';
 
   /// Clipboard history for syncing to new web clients.
   final List<Map<String, dynamic>> _clipboardHistory = [];
 
-  /// Callbacks for UI updates.
+  // --- Callbacks for UI ---
   void Function(String deviceId, String deviceName, String platform, String ip)?
       onDeviceFound;
   void Function(String deviceId)? onDeviceLost;
-  /// Called when web client list changes (connect/disconnect/name update).
   void Function(List<({String name, String ip})> clients)? onWebClientsChanged;
   void Function(String content, String? sourceDeviceId, String? sourceDeviceName)?
       onClipboardReceived;
+
+  /// Pairing callbacks.
+  void Function(String deviceId, String deviceName, String platform, String pin)?
+      onPairRequestReceived;
+  void Function(String deviceId, String deviceName, String platform)?
+      onPairPinRequired;
+  void Function(String deviceId, String deviceName, String platform, String ip)?
+      onPeerPaired;
+  void Function(String deviceId)? onPeerDisconnected;
+  void Function(String deviceId, String reason)? onPairFailed;
 
   AppService();
 
@@ -49,13 +62,23 @@ class AppService {
     Log.i(_tag, 'Local IP: $localIp');
 
     // 1. Start TCP server (desktop ↔ desktop).
-    tcpServer = TcpServer(onMessage: (message, remoteIp) {
-      Log.d(_tag, 'TCP message: ${message.type.name} from $remoteIp');
-      // TODO: Handle incoming TCP messages.
+    tcpServer = TcpServer(onConnection: (socket) {
+      // Hand off to pairing service.
+      pairingService.handleIncomingConnection(socket);
     });
     final tcpPort = await tcpServer.start();
 
-    // 2. Start web server (desktop ↔ mobile).
+    // 2. Initialize pairing service.
+    pairingService = PairingService(
+      localDeviceId: _deviceId,
+      localDeviceName: _deviceName,
+      localPlatform: Platform.operatingSystem,
+      localTcpPort: tcpPort,
+      localWebPort: 0, // Will update after web server starts.
+    );
+    _wirePairingCallbacks();
+
+    // 3. Start web server (desktop ↔ mobile).
     webServer = EmbeddedWebServer(webClientPath: _webClientPath);
     final webPort =
         await webServer.start(port: await findAvailablePort(kWebPortMin, kWebPortMax));
@@ -76,11 +99,11 @@ class AppService {
       }
     };
 
-    // 3. Start clipboard monitoring.
+    // 4. Start clipboard monitoring.
     clipboard = ClipboardService(onClipboardChanged: _onClipboardChanged);
     clipboard.startMonitoring();
 
-    // 4. Start mDNS discovery (macOS only — nsd plugin doesn't support Linux).
+    // 5. Start mDNS discovery (macOS only — nsd plugin doesn't support Linux).
     if (Platform.isMacOS) {
       discovery = DiscoveryService(
         onDeviceFound: (device) {
@@ -103,6 +126,69 @@ class AppService {
 
     Log.i(_tag, 'Started — TCP: $tcpPort, Web: $webPort');
     Log.i(_tag, 'Mobile URL: $webUrl');
+  }
+
+  void _wirePairingCallbacks() {
+    pairingService.onPairRequestReceived = (deviceId, name, platform, pin) {
+      onPairRequestReceived?.call(deviceId, name, platform, pin);
+    };
+    pairingService.onPairPinRequired = (deviceId, name, platform) {
+      onPairPinRequired?.call(deviceId, name, platform);
+    };
+    pairingService.onPeerPaired = (deviceId, name, platform, ip) {
+      onPeerPaired?.call(deviceId, name, platform, ip);
+      _broadcastDeviceList();
+    };
+    pairingService.onPeerDisconnected = (deviceId) {
+      onPeerDisconnected?.call(deviceId);
+      _broadcastDeviceList();
+    };
+    pairingService.onPairFailed = (deviceId, reason) {
+      onPairFailed?.call(deviceId, reason);
+    };
+    pairingService.onClipboardReceived = (content, sourceId, sourceName) {
+      Log.d(_tag, 'Clipboard from paired desktop: $sourceName (${content.length} chars)');
+      clipboard.write(content);
+      onClipboardReceived?.call(content, sourceId, sourceName);
+
+      final item = {
+        'id': const Uuid().v4(),
+        'type': 'text',
+        'content': content,
+        'sourceDeviceId': sourceId,
+        'sourceDeviceName': sourceName,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      _addToHistory(item);
+
+      // Also push to mobile browsers.
+      webServer.broadcast('clipboard:update', item);
+    };
+  }
+
+  /// Connect to a remote desktop by IP.
+  Future<void> connectToDesktop(String ip, int port) async {
+    await pairingService.initiateConnection(ip, port);
+  }
+
+  /// Submit PIN for ongoing pairing (initiator side).
+  Future<void> submitPairingPin(String deviceId, String pin) async {
+    await pairingService.submitPinAndDeriveKey(deviceId, pin);
+  }
+
+  /// Approve pairing request (responder side).
+  Future<void> approvePairing(String deviceId) async {
+    await pairingService.approvePairing(deviceId);
+  }
+
+  /// Reject pairing request (responder side).
+  Future<void> rejectPairing(String deviceId) async {
+    await pairingService.rejectPairing(deviceId);
+  }
+
+  /// Disconnect a paired desktop.
+  Future<void> disconnectPeer(String deviceId) async {
+    await pairingService.disconnectPeer(deviceId);
   }
 
   void _addToHistory(Map<String, dynamic> item) {
@@ -128,7 +214,8 @@ class AppService {
 
     onClipboardReceived?.call(content, null, _deviceName);
 
-    // TODO: Send to paired desktops via TCP.
+    // Send to paired desktops via TCP.
+    pairingService.broadcastClipboard(content, _deviceId, _deviceName);
   }
 
   void _handleWebSocketMessage(Map<String, dynamic> msg) {
@@ -157,6 +244,9 @@ class AppService {
 
           // Broadcast to other mobile clients.
           webServer.broadcast('clipboard:update', item);
+
+          // Also send to paired desktops.
+          pairingService.broadcastClipboard(content, 'mobile', 'Mobile Browser');
         }
         break;
 
@@ -187,7 +277,15 @@ class AppService {
       },
     ];
 
-    // TODO: Add other discovered desktops from discovery service.
+    // Add paired desktops.
+    for (final peer in pairingService.peers) {
+      devices.add({
+        'id': peer.deviceId,
+        'name': peer.deviceName,
+        'platform': peer.platform,
+        'ip': peer.ip,
+      });
+    }
 
     webServer.broadcast('device:list', {
       'devices': devices,
@@ -197,6 +295,7 @@ class AppService {
 
   Future<void> stop() async {
     clipboard.dispose();
+    await pairingService.disconnectAll();
     await discovery?.dispose();
     await tcpServer.stop();
     await webServer.stop();

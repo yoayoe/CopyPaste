@@ -21,6 +21,8 @@ class Message {
     required String id,
     required String senderId,
     required String content,
+    String? senderName,
+    String? hmac,
   }) {
     final payload = utf8.encode(content);
     return Message(
@@ -28,9 +30,11 @@ class Message {
       meta: {
         'id': id,
         'sender': senderId,
+        if (senderName != null) 'senderName': senderName,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'encoding': 'utf-8',
         'size': payload.length,
+        if (hmac != null) 'hmac': hmac,
       },
       payload: Uint8List.fromList(payload),
     );
@@ -57,6 +61,74 @@ class Message {
         payload: Uint8List(0),
       );
 
+  /// Create a reject message.
+  factory Message.reject(String reason) => Message(
+        type: MessageType.reject,
+        meta: {'reason': reason},
+        payload: Uint8List(0),
+      );
+
+  /// Initiator → Responder: "I want to pair".
+  factory Message.pairRequest({
+    required String senderId,
+    required String senderName,
+    required String platform,
+    required int tcpPort,
+    required int webPort,
+  }) =>
+      Message(
+        type: MessageType.pairRequest,
+        meta: {
+          'sender': senderId,
+          'senderName': senderName,
+          'platform': platform,
+          'tcpPort': tcpPort,
+          'webPort': webPort,
+        },
+        payload: Uint8List(0),
+      );
+
+  /// Responder → Initiator: "Here's a challenge nonce".
+  factory Message.pairChallenge({required String nonce}) => Message(
+        type: MessageType.pairChallenge,
+        meta: {'nonce': nonce},
+        payload: Uint8List(0),
+      );
+
+  /// Initiator → Responder: "Here's my proof (HMAC of PIN+nonce)".
+  factory Message.pairResponse({required String hmac}) => Message(
+        type: MessageType.pairResponse,
+        meta: {'hmac': hmac},
+        payload: Uint8List(0),
+      );
+
+  /// Responder → Initiator: "Pairing confirmed, here's device info".
+  factory Message.pairConfirm({
+    required String senderId,
+    required String senderName,
+    required String platform,
+    required int tcpPort,
+    required int webPort,
+  }) =>
+      Message(
+        type: MessageType.pairConfirm,
+        meta: {
+          'sender': senderId,
+          'senderName': senderName,
+          'platform': platform,
+          'tcpPort': tcpPort,
+          'webPort': webPort,
+        },
+        payload: Uint8List(0),
+      );
+
+  /// Disconnect notification.
+  factory Message.disconnect(String senderId) => Message(
+        type: MessageType.disconnect,
+        meta: {'sender': senderId},
+        payload: Uint8List(0),
+      );
+
   /// Serialize message to bytes for TCP transmission.
   Uint8List toBytes() {
     final metaBytes = utf8.encode(jsonEncode(meta));
@@ -64,6 +136,7 @@ class Message {
       version: kProtocolVersion,
       type: type,
       metaLength: metaBytes.length,
+      payloadLength: payload.length,
     );
 
     final headerBytes = header.toBytes();
@@ -78,20 +151,21 @@ class Message {
     return total;
   }
 
-  /// Deserialize message from raw bytes.
+  /// Deserialize message from raw bytes. Returns null if data is incomplete.
   static Message? fromBytes(Uint8List bytes) {
     final header = Header.fromBytes(bytes);
     if (header == null) return null;
 
     final metaStart = Header.size;
     final metaEnd = metaStart + header.metaLength;
+    final payloadEnd = metaEnd + header.payloadLength;
 
-    if (bytes.length < metaEnd) return null;
+    if (bytes.length < payloadEnd) return null;
 
     final metaBytes = bytes.sublist(metaStart, metaEnd);
     final meta =
         jsonDecode(utf8.decode(metaBytes)) as Map<String, dynamic>;
-    final payload = bytes.sublist(metaEnd);
+    final payload = bytes.sublist(metaEnd, payloadEnd);
 
     return Message(type: header.type, meta: meta, payload: payload);
   }

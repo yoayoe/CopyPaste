@@ -17,15 +17,25 @@
 - Device list sudah menampilkan connected web clients (Android & iOS browser)
 
 #### Phase 2: Desktop Clipboard Sync
-- [x] Binary protocol message frame ✅
+- [x] Binary protocol message frame (v2 — 12-byte header with payload length) ✅
 - [x] Text clipboard monitoring (polling via Flutter Clipboard API) ✅
-- [ ] Send/receive text between desktops (TCP) — protocol ready, belum wired antar desktop
+- [x] Send/receive text between desktops (TCP) ✅
 - [x] Clipboard history (in-memory, synced ke web clients) ✅
+- [x] Manual IP connection (connect to desktop via IP:port) ✅
+- [x] PIN-based pairing (6-digit PIN + HMAC-SHA256 verification) ✅
+- [x] Session key derivation (HKDF-SHA256) ✅
+- [x] HMAC authentication on all clipboard messages ✅
+- [x] Persistent TCP connections (PeerConnection with message framing) ✅
+- [x] Auto clipboard sync to all paired desktops ✅
 
 **Catatan Phase 2:**
 - Clipboard monitoring menggunakan polling (`500ms`) karena platform-specific listener belum diimplementasi
 - Clipboard sync antara desktop ↔ mobile browser sudah berfungsi penuh
-- Desktop ↔ desktop clipboard sync via TCP belum di-wire
+- Desktop ↔ desktop clipboard sync sudah berfungsi via TCP dengan PIN-based pairing
+- Protocol version bumped ke v2 (header 12 bytes, tambah payloadLength field)
+- Pairing flow: pairRequest → pairChallenge(nonce) → pairResponse(HMAC) → pairConfirm
+- Session key di-derive via HKDF(PIN + nonce) untuk HMAC authentication ongoing messages
+- Manual IP connection sebagai alternatif mDNS (Linux tidak support mDNS via nsd)
 
 #### Phase 3: Embedded Web Server + Web Client
 - [x] Embedded HTTP server di desktop app ✅
@@ -66,7 +76,8 @@
 - [ ] Checksum verification
 
 #### Phase 5: Security
-- [ ] Desktop ↔ Desktop: X25519 key exchange + AES-256-GCM
+- [x] Desktop ↔ Desktop: PIN-based pairing + HMAC-SHA256 + HKDF session key ✅
+- [ ] Desktop ↔ Desktop: upgrade to X25519 key exchange + AES-256-GCM (optional)
 - [ ] Desktop ↔ Mobile: self-signed TLS (HTTPS)
 - [ ] Session management + token expiry
 - [ ] Secure key storage (macOS Keychain, Linux libsecret)
@@ -95,11 +106,11 @@
 
 | Issue | Detail | Priority |
 |-------|--------|----------|
-| Linux mDNS | `nsd` plugin tidak support Linux desktop. Perlu implementasi via `avahi-daemon` D-Bus API | High |
-| Desktop ↔ Desktop sync | TCP protocol ready tapi belum di-wire untuk clipboard sync antar desktop | Medium |
+| Linux mDNS | `nsd` plugin tidak support Linux desktop. Workaround: manual IP connection | Medium |
 | Token auth | QR code belum berisi one-time token, URL langsung tanpa auth | Medium |
 | Clipboard polling | Menggunakan polling 500ms, bukan native listener per-platform | Low |
 | Flutter snap | Tidak bisa dipakai karena AppArmor. Harus manual install | Info |
+| ~~Desktop ↔ Desktop sync~~ | ~~Solved~~ — PIN-based pairing + HMAC + persistent TCP | Done |
 
 ---
 
