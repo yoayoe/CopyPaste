@@ -14,6 +14,7 @@ class TransferTask {
   final String deviceName;
   final DateTime startedAt;
   final String? error;
+  final String? filePath;
 
   const TransferTask({
     required this.id,
@@ -27,6 +28,7 @@ class TransferTask {
     required this.deviceName,
     required this.startedAt,
     this.error,
+    this.filePath,
   });
 
   double get progress =>
@@ -36,6 +38,7 @@ class TransferTask {
     int? transferredBytes,
     TransferStatus? status,
     String? error,
+    String? filePath,
   }) =>
       TransferTask(
         id: id,
@@ -49,5 +52,6 @@ class TransferTask {
         deviceName: deviceName,
         startedAt: startedAt,
         error: error ?? this.error,
+        filePath: filePath ?? this.filePath,
       );
 }

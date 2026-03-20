@@ -272,6 +272,19 @@ class AppService {
     };
     fileTransfer.onTransferComplete = (task, path) {
       onTransferComplete?.call(task, path);
+
+      // Register received files for mobile download.
+      if (task.direction == TransferDirection.receive && path.isNotEmpty) {
+        final fileId = webServer.addFileForDownload(path, task.filename, '');
+        webServer.broadcast('transfer:complete', {
+          'id': fileId,
+          'downloadId': fileId,
+          'filename': task.filename,
+          'size': task.totalBytes,
+          'status': 'completed',
+        });
+        Log.i(_tag, 'File available for mobile download: ${task.filename} (id: $fileId)');
+      }
     };
     fileTransfer.onTransferFailed = (task, error) {
       onTransferFailed?.call(task, error);

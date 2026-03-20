@@ -137,6 +137,7 @@ class FileTransferService {
     final completed = task.copyWith(
       transferredBytes: totalSize,
       status: TransferStatus.completed,
+      filePath: filePath,
     );
     onTransferComplete?.call(completed, filePath);
     Log.i(_tag, 'Sent $filename to ${peer.deviceName}');
@@ -238,6 +239,7 @@ class FileTransferService {
       deviceId: incoming.senderId,
       deviceName: incoming.senderName,
       startedAt: DateTime.now(),
+      filePath: savePath,
     );
 
     onTransferComplete?.call(task, savePath);

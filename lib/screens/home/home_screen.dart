@@ -224,7 +224,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(transferProvider.notifier).addOrUpdate(task);
     };
     appService.onTransferComplete = (task, path) {
-      ref.read(transferProvider.notifier).addOrUpdate(task);
+      // Ensure filePath is set on the task.
+      final updatedTask = task.filePath != null && task.filePath!.isNotEmpty
+          ? task
+          : task.copyWith(filePath: path);
+      ref.read(transferProvider.notifier).addOrUpdate(updatedTask);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${task.direction.name == 'receive' ? 'Received' : 'Sent'}: ${task.filename}')),
       );
