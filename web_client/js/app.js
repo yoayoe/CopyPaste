@@ -35,7 +35,7 @@ const App = (() => {
 
     // Auth events.
     WS.on('auth:challenge', (data) => Auth.handleChallenge(data));
-    WS.on('auth:success', () => Auth.handleSuccess());
+    WS.on('auth:success', (data) => Auth.handleSuccess(data));
     WS.on('auth:failed', (data) => Auth.handleFailed(data));
     WS.on('auth:required', () => UI.toast('Please enter PIN first'));
 

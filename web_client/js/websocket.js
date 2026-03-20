@@ -8,10 +8,9 @@ const WS = (() => {
   const listeners = {};
 
   function getWsUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token') || '';
+    const sessionToken = localStorage.getItem('cp_session_token') || '';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws?token=${token}`;
+    return `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}`;
   }
 
   function connect() {

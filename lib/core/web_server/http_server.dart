@@ -32,6 +32,9 @@ class EmbeddedWebServer {
   final StreamController<Map<String, dynamic>> _incomingMessages =
       StreamController.broadcast();
 
+  /// Valid session tokens (survive reconnect/refresh).
+  final Set<String> _sessionTokens = {};
+
   /// Called when a web client connects or disconnects.
   void Function(List<WebClientInfo> clients)? onClientChanged;
 
@@ -98,22 +101,35 @@ class EmbeddedWebServer {
   Future<void> _handleWebSocket(HttpRequest request) async {
     final socket = await WebSocketTransformer.upgrade(request);
     final clientIp = request.connectionInfo?.remoteAddress.address ?? 'unknown';
-    final clientInfo = WebClientInfo(socket: socket, ip: clientIp);
+
+    // Check for session token in query params (reconnect/refresh).
+    final token = request.uri.queryParameters['token'];
+    final hasValidToken = token != null && token.isNotEmpty && _sessionTokens.contains(token);
+
+    final clientInfo = WebClientInfo(
+      socket: socket,
+      ip: clientIp,
+      authenticated: hasValidToken,
+    );
     _connectedClients.add(clientInfo);
 
-    Log.i(_tag, 'WebSocket connected from $clientIp (${_connectedClients.length} clients)');
+    Log.i(_tag, 'WebSocket connected from $clientIp '
+        '(${hasValidToken ? "has token" : "new"}, ${_connectedClients.length} clients)');
 
-    // Generate PIN and nonce for this client.
-    final pin = _generatePin();
-    final nonce = _generateNonce();
-    clientInfo._pin = pin;
-    clientInfo._nonce = nonce;
+    if (hasValidToken) {
+      // Already authenticated via session token — send success immediately.
+      _sendToClient(clientInfo, 'auth:success', {'message': 'Session restored'});
+      onClientChanged?.call(_connectedClients);
+    } else {
+      // New client — require PIN.
+      final pin = _generatePin();
+      final nonce = _generateNonce();
+      clientInfo._pin = pin;
+      clientInfo._nonce = nonce;
 
-    // Send auth challenge to web client.
-    _sendToClient(clientInfo, 'auth:challenge', {'nonce': nonce});
-
-    // Notify desktop to display the PIN.
-    onPinGenerated?.call(clientIp, clientInfo.name, pin);
+      _sendToClient(clientInfo, 'auth:challenge', {'nonce': nonce});
+      onPinGenerated?.call(clientIp, clientInfo.name, pin);
+    }
 
     socket.listen(
       (data) {
@@ -170,33 +186,45 @@ class EmbeddedWebServer {
   }
 
   Future<void> _handleAuthVerify(WebClientInfo client, Map<String, dynamic>? data) async {
-    if (data == null || client._pin == null || client._nonce == null) {
+    if (data == null || client._pin == null) {
       _sendToClient(client, 'auth:failed', {'message': 'Invalid request'});
       return;
     }
 
+    // Accept direct PIN match (works on HTTP where crypto.subtle is unavailable).
+    final receivedPin = data['pin'] as String?;
     final receivedHmac = data['hmac'] as String?;
-    if (receivedHmac == null) {
-      _sendToClient(client, 'auth:failed', {'message': 'Missing HMAC'});
-      return;
+
+    bool verified = false;
+
+    if (receivedPin != null && receivedPin == client._pin) {
+      // Direct PIN match.
+      verified = true;
+    } else if (receivedHmac != null && client._nonce != null) {
+      // HMAC verification (HTTPS/localhost).
+      final expectedHmac = await _computeHmac(client._pin!, client._nonce!);
+      verified = receivedHmac == expectedHmac;
     }
 
-    // Compute expected HMAC(PIN, nonce).
-    final expectedHmac = await _computeHmac(client._pin!, client._nonce!);
-
-    if (receivedHmac != expectedHmac) {
+    if (!verified) {
       Log.w(_tag, 'PIN verification failed from ${client.name} (${client.ip})');
       _sendToClient(client, 'auth:failed', {'message': 'Invalid PIN'});
       return;
     }
 
-    // PIN verified!
+    // PIN verified! Generate session token for future reconnects.
     client.authenticated = true;
     client._pin = null;
     client._nonce = null;
 
+    final sessionToken = _generateSessionToken();
+    _sessionTokens.add(sessionToken);
+
     Log.i(_tag, 'Client authenticated: ${client.name} (${client.ip})');
-    _sendToClient(client, 'auth:success', {'message': 'Authenticated'});
+    _sendToClient(client, 'auth:success', {
+      'message': 'Authenticated',
+      'sessionToken': sessionToken,
+    });
     onClientChanged?.call(_connectedClients);
   }
 
@@ -304,6 +332,12 @@ class EmbeddedWebServer {
   String _generatePin() {
     final rng = Random.secure();
     return List.generate(6, (_) => rng.nextInt(10)).join();
+  }
+
+  String _generateSessionToken() {
+    final rng = Random.secure();
+    final bytes = List.generate(48, (_) => rng.nextInt(256));
+    return base64Url.encode(bytes);
   }
 
   String _generateNonce() {
