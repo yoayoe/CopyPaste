@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 import '../../utils/logger.dart';
+import '../../utils/mime_parser.dart';
 
 const _tag = 'WebServer';
 
@@ -34,6 +35,15 @@ class EmbeddedWebServer {
 
   /// Valid session tokens (survive reconnect/refresh).
   final Set<String> _sessionTokens = {};
+
+  /// Received files stored temporarily for download. fileId → (path, filename, checksum).
+  final Map<String, ({String path, String filename, String checksum})> _receivedFiles = {};
+
+  /// Directory for received file storage.
+  String? _downloadDir;
+
+  /// Called when a file is uploaded from mobile.
+  void Function(String fileId, String filename, int size, String checksum)? onFileUploaded;
 
   /// Called when a web client connects or disconnects.
   void Function(List<WebClientInfo> clients)? onClientChanged;
@@ -265,17 +275,120 @@ class EmbeddedWebServer {
   }
 
   Future<void> _handleUpload(HttpRequest request) async {
-    // TODO: Implement file upload handling.
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(jsonEncode({'status': 'not_implemented'}));
-    await request.response.close();
+    // Ensure download dir exists.
+    _downloadDir ??= '${Directory.systemTemp.path}/copypaste_files';
+    await Directory(_downloadDir!).create(recursive: true);
+
+    try {
+      final contentType = request.headers.contentType;
+      if (contentType == null || contentType.mimeType != 'multipart/form-data') {
+        request.response.statusCode = 400;
+        request.response.write(jsonEncode({'error': 'Expected multipart/form-data'}));
+        await request.response.close();
+        return;
+      }
+
+      final boundary = contentType.parameters['boundary'];
+      if (boundary == null) {
+        request.response.statusCode = 400;
+        request.response.write(jsonEncode({'error': 'Missing boundary'}));
+        await request.response.close();
+        return;
+      }
+
+      final parts = await parseMultipart(request, boundary);
+
+      for (final part in parts) {
+        final filename = part.filename ?? 'unknown';
+
+        final fileId = _generateSessionToken().substring(0, 16);
+        final savePath = '$_downloadDir/$fileId-$filename';
+        final file = File(savePath);
+        await file.writeAsBytes(part.body);
+        final totalBytes = part.body.length;
+
+        // Compute SHA-256 checksum.
+        final checksum = await _computeFileChecksum(savePath);
+
+        _receivedFiles[fileId] = (path: savePath, filename: filename, checksum: checksum);
+        Log.i(_tag, 'File uploaded: $filename ($totalBytes bytes, id: $fileId)');
+
+        onFileUploaded?.call(fileId, filename, totalBytes, checksum);
+
+        // Notify web clients about the received file.
+        broadcast('transfer:complete', {
+          'id': fileId,
+          'filename': filename,
+          'size': totalBytes,
+          'checksum': checksum,
+          'status': 'completed',
+        });
+
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({
+          'status': 'ok',
+          'fileId': fileId,
+          'filename': filename,
+          'size': totalBytes,
+          'checksum': checksum,
+        }));
+        await request.response.close();
+        return;
+      }
+
+      request.response.statusCode = 400;
+      request.response.write(jsonEncode({'error': 'No file in request'}));
+      await request.response.close();
+    } catch (e) {
+      Log.e(_tag, 'Upload error', e);
+      request.response.statusCode = 500;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': e.toString()}));
+      await request.response.close();
+    }
   }
 
   Future<void> _handleDownload(HttpRequest request) async {
-    // TODO: Implement file download handling.
-    request.response.statusCode = 404;
-    request.response.write('Not Found');
-    await request.response.close();
+    final path = request.uri.path;
+    final fileId = path.replaceFirst('/api/download/', '');
+
+    final fileInfo = _receivedFiles[fileId];
+    if (fileInfo == null) {
+      request.response.statusCode = 404;
+      request.response.write('File not found');
+      await request.response.close();
+      return;
+    }
+
+    final file = File(fileInfo.path);
+    if (!await file.exists()) {
+      _receivedFiles.remove(fileId);
+      request.response.statusCode = 404;
+      request.response.write('File not found');
+      await request.response.close();
+      return;
+    }
+
+    final stat = await file.stat();
+    request.response.headers.contentType = ContentType.binary;
+    request.response.headers.add('Content-Disposition',
+        'attachment; filename="${Uri.encodeComponent(fileInfo.filename)}"');
+    request.response.contentLength = stat.size;
+    await file.openRead().pipe(request.response);
+  }
+
+  /// Make a file available for download by mobile clients.
+  String addFileForDownload(String filePath, String filename, String checksum) {
+    final fileId = _generateSessionToken().substring(0, 16);
+    _receivedFiles[fileId] = (path: filePath, filename: filename, checksum: checksum);
+    return fileId;
+  }
+
+  Future<String> _computeFileChecksum(String filePath) async {
+    final file = File(filePath);
+    final bytes = await file.readAsBytes();
+    final hash = await Sha256().hash(bytes);
+    return base64Encode(hash.bytes);
   }
 
   Future<void> _serveStaticFile(HttpRequest request) async {

@@ -69,11 +69,19 @@
 - [x] Build release: `flutter build macos` ✅
 
 #### Phase 4: File Transfer
-- [ ] Desktop ↔ Desktop: chunked file transfer via TCP
-- [ ] Mobile → Desktop: file upload via HTTP multipart
-- [ ] Desktop → Mobile: file download via HTTP
-- [ ] Transfer progress UI (desktop + web)
-- [ ] Checksum verification
+- [x] Desktop ↔ Desktop: chunked file transfer via TCP (64KB chunks) ✅
+- [x] Mobile → Desktop: file upload via HTTP multipart ✅
+- [x] Desktop → Mobile: file download via HTTP ✅
+- [x] Transfer progress UI (desktop + web) ✅
+- [x] Checksum verification (SHA-256) ✅
+
+**Catatan Phase 4:**
+- File transfer desktop ↔ desktop menggunakan chunked binary protocol (64KB per chunk)
+- Upload mobile via multipart/form-data, download via `/api/download/:fileId`
+- SHA-256 checksum verification di kedua sisi (sender & receiver)
+- Transfer progress real-time di desktop (LinearProgressIndicator) dan web client
+- Desktop UI memiliki tab Files dengan FAB untuk pick & send file
+- File disimpan di temp directory (`/tmp/copypaste_files/`)
 
 #### Phase 5: Security
 - [x] Desktop ↔ Desktop: PIN-based pairing + HMAC-SHA256 + HKDF session key ✅
@@ -95,10 +103,17 @@
 #### Phase 7: v1 Release
 - [ ] Unit tests & integration tests
 - [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Packaging: AppImage / .deb (Linux), .dmg (macOS)
-- [ ] README & user documentation
+- [x] Packaging: .deb (Linux) — `scripts/build-deb.sh` ✅
+- [x] Packaging: .dmg (macOS) — `scripts/build-dmg.sh` ✅
+- [x] README & user documentation ✅
 - [x] MIT License ✅
 - [ ] First GitHub release
+
+**Catatan Phase 7:**
+- `scripts/build-deb.sh` — Build .deb package, auto Flutter build + dpkg-deb
+- `scripts/build-dmg.sh` — Build .dmg package, auto Flutter build + code sign + hdiutil/create-dmg
+- .deb installs ke `/usr/lib/copypaste/`, launcher di `/usr/bin/copypaste`, .desktop file included
+- .dmg menggunakan `create-dmg` jika tersedia, fallback ke `hdiutil`
 
 ---
 

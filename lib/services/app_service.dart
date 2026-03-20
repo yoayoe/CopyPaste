@@ -4,7 +4,9 @@ import 'package:uuid/uuid.dart';
 import '../core/discovery/discovery_service.dart';
 import '../core/network/tcp_server.dart';
 import '../core/web_server/http_server.dart';
+import '../models/transfer_task.dart';
 import '../services/clipboard_service.dart';
+import '../services/file_transfer_service.dart';
 import '../services/pairing_service.dart';
 import '../utils/constants.dart';
 import '../utils/logger.dart';
@@ -23,6 +25,7 @@ class AppService {
   late final EmbeddedWebServer webServer;
   late final ClipboardService clipboard;
   late final PairingService pairingService;
+  late final FileTransferService fileTransfer;
 
   String get deviceId => _deviceId;
   String get deviceName => _deviceName;
@@ -53,6 +56,11 @@ class AppService {
 
   /// Called when a mobile web client needs PIN verification.
   void Function(String clientIp, String clientName, String pin)? onWebPinGenerated;
+
+  /// File transfer callbacks.
+  void Function(TransferTask task)? onTransferProgress;
+  void Function(TransferTask task, String filePath)? onTransferComplete;
+  void Function(TransferTask task, String error)? onTransferFailed;
 
   AppService();
 
@@ -111,7 +119,30 @@ class AppService {
     clipboard = ClipboardService(onClipboardChanged: _onClipboardChanged);
     clipboard.startMonitoring();
 
-    // 5. Start mDNS discovery (macOS only — nsd plugin doesn't support Linux).
+    // 5. Initialize file transfer service.
+    fileTransfer = FileTransferService();
+    await fileTransfer.init();
+    _wireFileTransferCallbacks();
+
+    // Wire file upload from mobile.
+    webServer.onFileUploaded = (fileId, filename, size, checksum) {
+      Log.i(_tag, 'File uploaded from mobile: $filename ($size bytes)');
+      final task = TransferTask(
+        id: fileId,
+        filename: filename,
+        mimeType: 'application/octet-stream',
+        totalBytes: size,
+        transferredBytes: size,
+        status: TransferStatus.completed,
+        direction: TransferDirection.receive,
+        deviceId: 'mobile',
+        deviceName: 'Mobile Browser',
+        startedAt: DateTime.now(),
+      );
+      onTransferComplete?.call(task, '');
+    };
+
+    // 6. Start mDNS discovery (macOS only — nsd plugin doesn't support Linux).
     if (Platform.isMacOS) {
       discovery = DiscoveryService(
         onDeviceFound: (device) {
@@ -153,6 +184,9 @@ class AppService {
     };
     pairingService.onPairFailed = (deviceId, reason) {
       onPairFailed?.call(deviceId, reason);
+    };
+    pairingService.onFileReceived = (message) {
+      fileTransfer.handleFileMessage(message);
     };
     pairingService.onClipboardReceived = (content, sourceId, sourceName) {
       Log.d(_tag, 'Clipboard from paired desktop: $sourceName (${content.length} chars)');
@@ -197,6 +231,51 @@ class AppService {
   /// Disconnect a paired desktop.
   Future<void> disconnectPeer(String deviceId) async {
     await pairingService.disconnectPeer(deviceId);
+  }
+
+  /// Send a file to a paired desktop.
+  Future<void> sendFileToPeer(String filePath, String deviceId) async {
+    final peer = pairingService.peers
+        .where((p) => p.deviceId == deviceId)
+        .firstOrNull;
+    if (peer == null) {
+      Log.w(_tag, 'Peer $deviceId not found for file transfer');
+      return;
+    }
+    await fileTransfer.sendFile(filePath, peer,
+        senderId: _deviceId, senderName: _deviceName);
+  }
+
+  /// Send a file to all paired desktops.
+  Future<void> sendFileToAllPeers(String filePath) async {
+    for (final peer in pairingService.peers) {
+      await fileTransfer.sendFile(filePath, peer,
+          senderId: _deviceId, senderName: _deviceName);
+    }
+  }
+
+  /// Make a file available for mobile download and notify web clients.
+  void shareFileToMobile(String filePath, String filename, int size) {
+    final fileId = webServer.addFileForDownload(filePath, filename, '');
+    webServer.broadcast('transfer:complete', {
+      'id': fileId,
+      'downloadId': fileId,
+      'filename': filename,
+      'size': size,
+      'status': 'completed',
+    });
+  }
+
+  void _wireFileTransferCallbacks() {
+    fileTransfer.onTransferProgress = (task) {
+      onTransferProgress?.call(task);
+    };
+    fileTransfer.onTransferComplete = (task, path) {
+      onTransferComplete?.call(task, path);
+    };
+    fileTransfer.onTransferFailed = (task, error) {
+      onTransferFailed?.call(task, error);
+    };
   }
 
   void _addToHistory(Map<String, dynamic> item) {
@@ -303,6 +382,7 @@ class AppService {
 
   Future<void> stop() async {
     clipboard.dispose();
+    fileTransfer.dispose();
     await pairingService.disconnectAll();
     await discovery?.dispose();
     await tcpServer.stop();

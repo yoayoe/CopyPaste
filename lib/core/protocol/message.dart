@@ -122,6 +122,36 @@ class Message {
         payload: Uint8List(0),
       );
 
+  /// Create a file transfer message (chunked).
+  factory Message.file({
+    required String id,
+    required String senderId,
+    required String filename,
+    required int totalSize,
+    required int chunkIndex,
+    required int totalChunks,
+    required String checksum,
+    required Uint8List chunkData,
+    String? senderName,
+    String? hmac,
+  }) =>
+      Message(
+        type: MessageType.file,
+        meta: {
+          'id': id,
+          'sender': senderId,
+          if (senderName != null) 'senderName': senderName,
+          'filename': filename,
+          'totalSize': totalSize,
+          'chunkIndex': chunkIndex,
+          'totalChunks': totalChunks,
+          'chunkSize': chunkData.length,
+          'checksum': checksum,
+          if (hmac != null) 'hmac': hmac,
+        },
+        payload: chunkData,
+      );
+
   /// Disconnect notification.
   factory Message.disconnect(String senderId) => Message(
         type: MessageType.disconnect,

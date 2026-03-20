@@ -60,6 +60,9 @@ class PairingService {
   void Function(String content, String sourceDeviceId, String sourceDeviceName)?
       onClipboardReceived;
 
+  /// File message received from a paired peer.
+  void Function(Message message)? onFileReceived;
+
   /// Pairing failed or rejected.
   void Function(String deviceId, String reason)? onPairFailed;
 
@@ -213,6 +216,12 @@ class PairingService {
         _handlePairConfirm(message, peer);
       case MessageType.text:
         _handleText(message, peer);
+      case MessageType.file:
+        if (peer.state == PeerState.paired) {
+          onFileReceived?.call(message);
+        } else {
+          Log.w(_tag, 'File from unpaired peer ${peer.ip}, ignoring');
+        }
       case MessageType.ping:
         peer.send(Message.pong(localDeviceId));
       case MessageType.pong:

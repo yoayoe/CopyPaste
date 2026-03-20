@@ -32,7 +32,7 @@ const Transfer = (() => {
   function download(fileId, filename) {
     const a = document.createElement('a');
     a.href = `/api/download/${fileId}`;
-    a.download = filename;
+    a.download = filename || 'download';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

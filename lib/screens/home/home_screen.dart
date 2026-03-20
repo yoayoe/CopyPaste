@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../main.dart';
 import '../../models/device.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/clipboard_provider.dart';
+import '../../providers/transfer_provider.dart';
 import '../../providers/web_client_provider.dart';
 import 'widgets/device_list.dart';
 import 'widgets/clipboard_history.dart';
+import 'widgets/transfer_list.dart';
 import 'widgets/qr_code_panel.dart';
 import 'widgets/connect_dialog.dart';
 import 'widgets/pin_dialog.dart';
@@ -27,6 +30,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final ready = ref.watch(servicesReadyProvider);
     final devices = ref.watch(deviceProvider);
     final clipboardItems = ref.watch(clipboardProvider);
+    final transfers = ref.watch(transferProvider);
     final webClients = ref.watch(webClientsProvider);
 
     if (ready && !_callbacksWired) {
@@ -102,8 +106,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onConnectPressed: ready ? () => _showConnectDialog(context) : null,
           ),
           ClipboardHistory(items: clipboardItems),
+          TransferList(transfers: transfers),
         ],
       ),
+      floatingActionButton: _selectedTab == 2 && ready
+          ? FloatingActionButton(
+              onPressed: () => _pickAndSendFile(context),
+              tooltip: 'Send file',
+              child: const Icon(Icons.attach_file),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedTab,
         onDestinationSelected: (index) {
@@ -117,6 +129,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           NavigationDestination(
             icon: const Icon(Icons.content_paste),
             label: 'Clipboard (${clipboardItems.length})',
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.folder),
+            label: 'Files (${transfers.length})',
           ),
         ],
       ),
@@ -202,6 +218,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     appService.onWebPinGenerated = (clientIp, clientName, pin) {
       _showMobilePinDialog(clientIp, clientName, pin);
     };
+
+    // File transfer callbacks.
+    appService.onTransferProgress = (task) {
+      ref.read(transferProvider.notifier).addOrUpdate(task);
+    };
+    appService.onTransferComplete = (task, path) {
+      ref.read(transferProvider.notifier).addOrUpdate(task);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${task.direction.name == 'receive' ? 'Received' : 'Sent'}: ${task.filename}')),
+      );
+    };
+    appService.onTransferFailed = (task, error) {
+      ref.read(transferProvider.notifier).addOrUpdate(task);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Transfer failed: ${task.filename}')),
+      );
+    };
+  }
+
+  Future<void> _pickAndSendFile(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    if (file.path == null) return;
+
+    final appService = ref.read(appServiceProvider);
+
+    // Send to all paired desktops.
+    await appService.sendFileToAllPeers(file.path!);
+
+    // Also share to mobile web clients for download.
+    appService.shareFileToMobile(file.path!, file.name, file.size);
   }
 
   void _showConnectDialog(BuildContext context) {
