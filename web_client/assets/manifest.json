@@ -1,0 +1,10 @@
+{
+  "name": "CopyPaste",
+  "short_name": "CopyPaste",
+  "description": "Clipboard sharing & file transfer over local network",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "icons": []
+}

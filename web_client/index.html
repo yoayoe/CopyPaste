@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>CopyPaste</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="assets/manifest.json">
+</head>
+<body>
+  <header>
+    <h1>CopyPaste</h1>
+    <span id="connection-status" class="status disconnected">Connecting...</span>
+  </header>
+  <div id="debug-bar" style="padding:4px 16px;font-size:11px;color:#999;display:none;"></div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="clipboard">Clipboard</button>
+    <button class="tab" data-tab="files">Files</button>
+    <button class="tab" data-tab="devices">Devices</button>
+  </nav>
+
+  <main>
+    <!-- Clipboard Tab -->
+    <section id="tab-clipboard" class="tab-content active">
+      <div class="input-group">
+        <textarea id="clip-input" placeholder="Paste text here or tap 'Read Clipboard'..." rows="4"></textarea>
+        <div class="btn-row">
+          <button id="btn-read-clipboard" class="btn secondary">Read Clipboard</button>
+          <button id="btn-send" class="btn primary">Send to Desktop</button>
+        </div>
+      </div>
+
+      <h2>History</h2>
+      <div id="clipboard-history" class="history-list">
+        <p class="empty-state">No clipboard history yet</p>
+      </div>
+    </section>
+
+    <!-- Files Tab -->
+    <section id="tab-files" class="tab-content">
+      <div class="input-group">
+        <input type="file" id="file-input" multiple hidden>
+        <button id="btn-pick-file" class="btn primary full-width">Pick File to Send</button>
+      </div>
+
+      <h2>Transfers</h2>
+      <div id="transfer-list" class="history-list">
+        <p class="empty-state">No transfers yet</p>
+      </div>
+    </section>
+
+    <!-- Devices Tab -->
+    <section id="tab-devices" class="tab-content">
+      <h2>Connected Devices</h2>
+      <div id="device-list" class="history-list">
+        <p class="empty-state">No devices connected</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/websocket.js"></script>
+  <script src="js/clipboard.js"></script>
+  <script src="js/transfer.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

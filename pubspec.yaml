@@ -1,0 +1,54 @@
+name: copypaste
+description: Open-source, self-hosted, cross-platform clipboard sharing and file transfer tool over local network (P2P).
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.8.0
+  flutter: ^3.41.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Networking & Discovery
+  nsd: ^4.0.0
+  shelf: ^1.4.2
+  shelf_web_socket: ^3.0.0
+
+  # Encryption
+  cryptography: ^2.7.0
+
+  # File handling
+  file_picker: ^9.2.1
+  path_provider: ^2.1.5
+
+  # UI & Desktop
+  qr_flutter: ^4.1.0
+  local_notifier: ^0.1.6
+  window_manager: ^0.4.3
+
+  # Storage & Utils
+  shared_preferences: ^2.5.3
+  uuid: ^4.5.1
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.14
+  freezed: ^2.5.8
+  json_serializable: ^6.9.4
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/
+    - assets/images/
+    - web_client/

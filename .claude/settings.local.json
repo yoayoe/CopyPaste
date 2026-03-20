@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter:*)",
+      "Bash(snap list:*)",
+      "Read(//home/yoayoe/snap/**)",
+      "Read(//opt/**)",
+      "Read(//home/yoayoe/**)",
+      "Bash(/snap/bin/flutter create:*)"
+    ]
+  }
+}
