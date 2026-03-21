@@ -12,8 +12,9 @@ class ClipboardService {
   Timer? _pollTimer;
   String _lastContent = '';
   String _lastImageHash = '';
-  bool _suppressNextImage = false;
-  bool _suppressNextText = false;
+
+  /// Timestamp-based suppression: ignore changes until this time.
+  DateTime _suppressUntil = DateTime(0);
 
   final void Function(String content)? onClipboardChanged;
   final void Function(Uint8List imageData)? onImageClipboardChanged;
@@ -26,63 +27,67 @@ class ClipboardService {
     Log.i(_tag, 'Monitoring started');
   }
 
+  bool get _isSuppressed => DateTime.now().isBefore(_suppressUntil);
+
   Future<void> _poll() async {
+    if (_isSuppressed) return;
+
     try {
-      // Check text first.
+      // Check image clipboard first (higher priority).
+      if (onImageClipboardChanged != null) {
+        final imageChanged = await _pollImage();
+        if (imageChanged) return; // Image changed — skip text check.
+      }
+
+      // Check text.
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final content = data?.text ?? '';
 
       if (content.isNotEmpty && content != _lastContent) {
         _lastContent = content;
-        if (_suppressNextText) {
-          _suppressNextText = false;
-        } else {
-          onClipboardChanged?.call(content);
-          return; // Text changed — skip image check this cycle.
-        }
-      }
-
-      // Check image clipboard.
-      if (onImageClipboardChanged != null) {
-        await _pollImage();
+        onClipboardChanged?.call(content);
       }
     } catch (e) {
       // Clipboard may be unavailable momentarily.
     }
   }
 
-  Future<void> _pollImage() async {
+  /// Returns true if a new image was detected.
+  Future<bool> _pollImage() async {
     try {
       final imageBytes = await Pasteboard.image;
-      if (imageBytes == null || imageBytes.isEmpty) return;
+      if (imageBytes == null || imageBytes.isEmpty) return false;
 
       if (imageBytes.length > kMaxImageClipboardSize) {
-        Log.w(_tag, 'Image too large: ${imageBytes.length} bytes, skipping');
-        return;
+        return false;
       }
 
       // Hash-based change detection.
       final hash = await _hashBytes(imageBytes);
-      if (hash == _lastImageHash) return;
+      if (hash == _lastImageHash) return false;
 
       _lastImageHash = hash;
 
-      if (_suppressNextImage) {
-        _suppressNextImage = false;
-        return;
-      }
-
       Log.i(_tag, 'Image clipboard changed: ${imageBytes.length} bytes');
       onImageClipboardChanged?.call(imageBytes);
+
+      // Also update _lastContent to whatever text is on clipboard now,
+      // so we don't double-fire a text event for the image's text representation.
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        _lastContent = data?.text ?? _lastContent;
+      } catch (_) {}
+
+      return true;
     } catch (e) {
-      // Image clipboard may not be available.
+      return false;
     }
   }
 
   /// Write text to the system clipboard.
   Future<void> write(String text) async {
-    _lastContent = text; // Prevent triggering our own change callback.
-    _suppressNextText = true;
+    _lastContent = text;
+    _suppress();
     await Clipboard.setData(ClipboardData(text: text));
     Log.d(_tag, 'Written ${text.length} chars');
   }
@@ -95,15 +100,34 @@ class ClipboardService {
 
   /// Write image (PNG) to the system clipboard.
   Future<void> writeImage(Uint8List imageData) async {
-    _lastImageHash = await _hashBytes(imageData);
-    _suppressNextImage = true;
+    _suppress();
     await Pasteboard.writeImage(imageData);
+
+    // Read back the actual hash (pasteboard may re-encode).
+    try {
+      final readBack = await Pasteboard.image;
+      if (readBack != null) {
+        _lastImageHash = await _hashBytes(readBack);
+      }
+    } catch (_) {}
+
+    // Also capture whatever text representation was set.
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (data?.text != null) _lastContent = data!.text!;
+    } catch (_) {}
+
     Log.d(_tag, 'Written image: ${imageData.length} bytes');
   }
 
   /// Read current clipboard image.
   Future<Uint8List?> readImage() async {
     return await Pasteboard.image;
+  }
+
+  /// Suppress all change detection for a short window.
+  void _suppress() {
+    _suppressUntil = DateTime.now().add(const Duration(seconds: 2));
   }
 
   Future<String> _hashBytes(Uint8List data) async {
