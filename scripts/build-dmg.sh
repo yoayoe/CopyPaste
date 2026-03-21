@@ -59,30 +59,14 @@ if [ ! -d "$APP_BUNDLE" ]; then
 fi
 echo "  Build complete: $APP_BUNDLE"
 
-# Step 2: Code sign with entitlements
+# Step 2: Skip re-signing — flutter build macos already signs with
+# the correct entitlements (Release.entitlements) via Xcode build system.
+# Re-signing with codesign --deep breaks nested framework signatures
+# and can strip entitlements or add incompatible hardened runtime flags.
 echo ""
-echo "[2/4] Code signing..."
-ENTITLEMENTS="$PROJECT_DIR/macos/Runner/Release.entitlements"
-if [ ! -f "$ENTITLEMENTS" ]; then
-    echo "  WARNING: Release.entitlements not found at $ENTITLEMENTS"
-    ENTITLEMENTS=""
-fi
-
-SIGN_FLAGS="--deep --force --options runtime"
-if [ -n "$ENTITLEMENTS" ]; then
-    SIGN_FLAGS="$SIGN_FLAGS --entitlements $ENTITLEMENTS"
-    echo "  Entitlements: $ENTITLEMENTS"
-fi
-
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "[1-9] valid"; then
-    IDENTITY=$(security find-identity -v -p codesigning | grep -m1 '"' | awk -F'"' '{print $2}')
-    echo "  Signing with: $IDENTITY"
-    codesign $SIGN_FLAGS --sign "$IDENTITY" "$APP_BUNDLE"
-else
-    echo "  No signing identity found — using ad-hoc signing"
-    codesign $SIGN_FLAGS --sign - "$APP_BUNDLE"
-fi
-echo "  Signed."
+echo "[2/4] Code signing... (skipped — already signed by Xcode)"
+echo "  Verifying existing signature..."
+codesign --verify --deep --strict "$APP_BUNDLE" && echo "  Signature valid." || echo "  WARNING: Signature verification failed"
 
 # Step 3: Create DMG
 echo ""
