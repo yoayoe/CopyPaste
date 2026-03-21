@@ -124,16 +124,20 @@
 - [ ] CI/CD pipeline (GitHub Actions)
 - [x] Packaging: .deb (Linux) — `scripts/build-deb.sh` ✅
 - [x] Packaging: .dmg (macOS) — `scripts/build-dmg.sh` ✅
+- [x] Packaging: .zip (Windows) — `scripts/build-windows.ps1` ✅
 - [x] README & user documentation ✅
 - [x] Architecture documentation ✅
 - [x] MIT License ✅
+- [x] Windows build guide — `docs/WINDOWS-BUILD-GUIDE.md` ✅
 - [ ] First GitHub release
 
 **Catatan Phase 7:**
 - `scripts/build-deb.sh` — Build .deb package, auto Flutter build + dpkg-deb
 - `scripts/build-dmg.sh` — Build .dmg package, auto Flutter build + code sign + hdiutil/create-dmg
+- `scripts/build-windows.ps1` — Build Windows release + icon conversion (ImageMagick/Pillow) + ZIP packaging
 - .deb installs ke `/usr/lib/copypaste/`, launcher di `/usr/bin/copypaste`, .desktop file included
 - .dmg menggunakan `create-dmg` jika tersedia, fallback ke `hdiutil`
+- Windows ZIP berisi portable executable, langsung run `copypaste.exe`
 
 ---
 
@@ -148,7 +152,8 @@
 | Phase 4: File Transfer | **Complete** | 100% |
 | Phase 5: Security | Auth + session mgmt + key storage + auto-reconnect done, encryption deferred | ~80% |
 | Phase 6: Polish & UX | Theme done, rest pending | ~15% |
-| Phase 7: v1 Release | Packaging & docs done, tests/CI pending | ~60% |
+| Phase 7: v1 Release | Packaging (Linux/macOS/Windows) & docs done, tests/CI pending | ~70% |
+| v2: Windows Support | Build, clipboard sync, file transfer, packaging done | ~80% |
 
 ---
 
@@ -166,15 +171,26 @@
 
 ---
 
-### v2 — Windows Support (Future)
+### v2 — Windows Support
 
-- [ ] Tambah Windows platform support di Flutter project
-- [ ] Clipboard listener via Win32 API (`AddClipboardFormatListener`)
+- [x] Tambah Windows platform support di Flutter project ✅
+- [ ] Clipboard listener via Win32 API (`AddClipboardFormatListener`) — saat ini polling 500ms
 - [ ] System tray icon
-- [ ] Windows Firewall auto-prompt
-- [ ] Key storage via DPAPI / Windows Credential Store
-- [ ] Packaging: .exe installer / MSIX
+- [x] Windows Firewall — auto-prompt saat pertama kali run ✅
+- [x] Key storage via DPAPI (`flutter_secure_storage`) ✅
+- [x] Packaging: .zip portable (`scripts/build-windows.ps1`) ✅
+- [ ] Packaging: .exe installer (Inno Setup) / MSIX — optional
 - [ ] Autostart via registry (optional)
+- [x] File transfer: send & receive ✅
+- [x] Open file location di Windows Explorer (`explorer /select,<path>`) ✅
+- [x] Clipboard sync (text) antar device ✅
+- [x] Build guide & dokumentasi (`docs/WINDOWS-BUILD-GUIDE.md`) ✅
+
+**Catatan v2 Windows:**
+- mDNS discovery (`nsd`) tidak support Windows — gunakan manual IP connection
+- Clipboard monitoring menggunakan polling 500ms (platform-agnostic), bisa upgrade ke Win32 `AddClipboardFormatListener` di masa depan
+- File diterima di `%APPDATA%\com.copypaste\copypaste\received_files\`
+- Build memerlukan Visual Studio 2022 dengan workload "Desktop development with C++"
 
 ---
 

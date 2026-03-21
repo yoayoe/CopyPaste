@@ -46,11 +46,11 @@ Desktop A (Flutter)    TCP (P2P)    Desktop B (Flutter)
 
 | Platform | Type | Status |
 |----------|------|--------|
-| Linux | Desktop app (Flutter) | v1 - Active |
-| macOS | Desktop app (Flutter) | v1 - Active |
-| Android | Web client (Browser) | v1 - Active |
-| iOS | Web client (Browser) | v1 - Active |
-| Windows | Desktop app (Flutter) | v2 - Planned |
+| Linux | Desktop app (Flutter) | Active |
+| macOS | Desktop app (Flutter) | Active |
+| Windows | Desktop app (Flutter) | Active |
+| Android | Web client (Browser) | Active |
+| iOS | Web client (Browser) | Active |
 
 ## Prerequisites
 
@@ -81,6 +81,21 @@ brew install flutter
 xcode-select --install
 ```
 
+### Windows
+
+```powershell
+# Flutter SDK
+# Download from https://docs.flutter.dev/get-started/install/windows/desktop
+
+# Visual Studio 2022 with "Desktop development with C++" workload
+# Download from https://visualstudio.microsoft.com/downloads/
+
+# Verify
+flutter doctor
+```
+
+> See [docs/WINDOWS-BUILD-GUIDE.md](docs/WINDOWS-BUILD-GUIDE.md) for detailed Windows setup guide.
+
 ## Getting Started
 
 ### 1. Clone the repository
@@ -104,6 +119,9 @@ flutter run -d linux
 
 # macOS
 flutter run -d macos
+
+# Windows
+flutter run -d windows
 ```
 
 ### 4. Connect mobile device
@@ -181,7 +199,19 @@ flutter build macos --release
 chmod +x scripts/build-dmg.sh
 ./scripts/build-dmg.sh
 
-# Output: build/CopyPaste_0.1.0.dmg
+# Output: build/CopyPaste_0.3.0.dmg
+```
+
+### Windows
+
+```powershell
+# Build Flutter release
+flutter build windows --release
+
+# Or use the build script (includes icon conversion + ZIP packaging)
+powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+
+# Output: build\CopyPaste_0.3.0_Windows.zip
 ```
 
 ## Project Structure
@@ -244,10 +274,12 @@ copy-paste/
 │   └── assets/manifest.json      # PWA manifest
 ├── scripts/
 │   ├── build-deb.sh              # Linux .deb package builder
-│   └── build-dmg.sh              # macOS .dmg package builder
+│   ├── build-dmg.sh              # macOS .dmg package builder
+│   └── build-windows.ps1         # Windows ZIP package builder
 ├── docs/
 │   ├── ARCHITECTURE.md           # Full architecture documentation
-│   └── DEVELOPMENT-PHASES.md     # Development roadmap & progress
+│   ├── DEVELOPMENT-PHASES.md     # Development roadmap & progress
+│   └── WINDOWS-BUILD-GUIDE.md    # Windows environment setup guide
 ├── pubspec.yaml                  # Flutter dependencies
 └── LICENSE                       # MIT License
 ```
@@ -278,9 +310,9 @@ See [docs/DEVELOPMENT-PHASES.md](docs/DEVELOPMENT-PHASES.md) for development pro
 | Security (Desktop) | PIN-based pairing + HMAC-SHA256 + HKDF session keys |
 | Security (Mobile) | 6-digit PIN verification + session token caching |
 | File transfer | Chunked TCP (64KB) + HTTP multipart + SHA-256 checksum |
-| Device discovery | mDNS/DNS-SD via `nsd` (macOS), manual IP (Linux) |
+| Device discovery | mDNS/DNS-SD via `nsd` (macOS), manual IP (Linux/Windows) |
 | Web client | Vanilla HTML/CSS/JS (< 50KB, no framework) |
-| Packaging | .deb (Linux), .dmg (macOS) |
+| Packaging | .deb (Linux), .dmg (macOS), .zip (Windows) |
 
 ### Running Tests
 
@@ -314,9 +346,17 @@ flutter test
 
 Don't use `snap install flutter`. The snap version has AppArmor confinement issues. Use manual SDK install.
 
-### mDNS not working on Linux
+### mDNS not working on Linux/Windows
 
-The `nsd` Flutter plugin does not support Linux desktop. Use **manual IP connection** to pair desktops on Linux. Mobile devices connect via QR code regardless.
+The `nsd` Flutter plugin does not support Linux or Windows desktop. Use **manual IP connection** to pair desktops. Mobile devices connect via QR code regardless.
+
+### Windows Firewall prompt
+
+On first run, Windows Firewall will ask to allow network access. Click **"Allow access"** for both private and public networks to enable connections from other devices.
+
+### Windows build errors
+
+See [docs/WINDOWS-BUILD-GUIDE.md](docs/WINDOWS-BUILD-GUIDE.md) for detailed troubleshooting (Visual Studio setup, CMake issues, etc.).
 
 ## License
 
