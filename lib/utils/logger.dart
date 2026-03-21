@@ -1,21 +1,21 @@
-import 'dart:developer' as dev;
+import 'package:flutter/foundation.dart';
 
 class Log {
   Log._();
 
   static void d(String tag, String message) {
-    dev.log('[$tag] $message', level: 0);
+    debugPrint('[$tag] $message');
   }
 
   static void i(String tag, String message) {
-    dev.log('[$tag] $message', level: 800);
+    debugPrint('[$tag] $message');
   }
 
   static void w(String tag, String message) {
-    dev.log('[$tag] ⚠ $message', level: 900);
+    debugPrint('[$tag] ⚠ $message');
   }
 
   static void e(String tag, String message, [Object? error]) {
-    dev.log('[$tag] ✖ $message', level: 1000, error: error);
+    debugPrint('[$tag] ✖ $message${error != null ? ': $error' : ''}');
   }
 }
