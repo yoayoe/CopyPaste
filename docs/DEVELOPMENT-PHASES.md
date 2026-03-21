@@ -94,7 +94,8 @@
 - [x] Session management + token expiry + revocation ✅
 - [ ] ~~Desktop ↔ Desktop: upgrade to X25519 key exchange + AES-256-GCM~~ — deferred (optional, tidak prioritas untuk local network)
 - [ ] ~~Desktop ↔ Mobile: self-signed TLS (HTTPS + WSS)~~ — deferred (menambah UX friction di mobile browser)
-- [ ] Secure key storage (macOS Keychain, Linux libsecret)
+- [x] Secure key storage (macOS Keychain, Linux libsecret) ✅
+- [x] Auto-reconnect paired desktops on restart ✅
 
 **Catatan Phase 5:**
 - Desktop↔Desktop: PIN pairing + HMAC auth sudah berjalan penuh
@@ -102,7 +103,11 @@
 - Session management: token expiry 24 jam, max 10 sessions, revoke dari desktop UI, auto-cleanup tiap 15 menit
 - X25519 + AES-256-GCM deferred — HMAC auth sudah cukup untuk local network, encryption bisa ditambah di v2
 - Self-signed TLS deferred — menambah UX friction di mobile (terutama iOS Safari) tanpa benefit signifikan di local network
-- Key storage masih in-memory (hilang saat app restart)
+- Secure key storage: session key disimpan di macOS Keychain (`flutter_secure_storage` dengan `useDataProtectionKeyChain: false`) dan Linux libsecret (`libsecret-1-dev`)
+- Auto-reconnect: saat app restart, coba reconnect ke paired peers via mutual HMAC-SHA256 challenge-response (message types `reconnectRequest` 0x15, `reconnectConfirm` 0x16)
+- Reconnect retry: 3 attempts dengan delay 0s, 5s, 10s — mengantisipasi peer belum siap
+- Simultaneous reconnect tiebreaker: device ID comparison — higher ID menjadi responder
+- Clipboard & file history tidak di-persist (hanya in-memory) — hilang saat restart, bisa ditambah di v2
 
 #### Phase 6: Polish & UX
 - [ ] Image clipboard support
@@ -141,7 +146,7 @@
 | Phase 3: Web Server + Web Client | **Complete** | 100% |
 | Phase 3.5: macOS Build & Test | **Complete** (mDNS test deferred) | ~95% |
 | Phase 4: File Transfer | **Complete** | 100% |
-| Phase 5: Security | Auth + session mgmt done, encryption deferred, key storage pending | ~65% |
+| Phase 5: Security | Auth + session mgmt + key storage + auto-reconnect done, encryption deferred | ~80% |
 | Phase 6: Polish & UX | Theme done, rest pending | ~15% |
 | Phase 7: v1 Release | Packaging & docs done, tests/CI pending | ~60% |
 
@@ -154,7 +159,7 @@
 | Linux mDNS | `nsd` plugin tidak support Linux desktop. Workaround: manual IP connection | Medium |
 | Clipboard polling | Menggunakan polling 500ms, bukan native listener per-platform | Low |
 | Flutter snap | Tidak bisa dipakai karena AppArmor. Harus manual install | Info |
-| Key persistence | Session keys hilang saat app restart — perlu secure storage | Medium |
+| ~~Key persistence~~ | ~~Solved~~ — session key di-persist via macOS Keychain / Linux libsecret, auto-reconnect on restart | Done |
 | ~~Desktop ↔ Desktop sync~~ | ~~Solved~~ — PIN-based pairing + HMAC + persistent TCP | Done |
 | ~~Mobile auth~~ | ~~Solved~~ — PIN verification + session token caching | Done |
 | ~~Token auth (QR)~~ | ~~Replaced~~ — PIN-based auth menggantikan one-time QR token | Done |

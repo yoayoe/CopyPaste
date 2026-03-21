@@ -13,7 +13,7 @@ set -e
 
 APP_NAME="copypaste"
 APP_DISPLAY_NAME="CopyPaste"
-APP_VERSION="0.2.0"
+APP_VERSION="0.3.0"
 APP_BUNDLE_NAME="copypaste.app"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
