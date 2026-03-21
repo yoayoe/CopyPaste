@@ -494,18 +494,39 @@ class PairingService {
         Log.i(_tag, 'Peer ${info.deviceName} already connected, skipping');
         continue;
       }
-      _attemptReconnect(info, sessionKey);
+      _attemptReconnectWithRetry(info, sessionKey);
     }
   }
 
-  Future<void> _attemptReconnect(
+  /// Attempt reconnect with retries (peer may not be ready yet).
+  Future<void> _attemptReconnectWithRetry(
+      PairedPeerInfo info, List<int> sessionKey) async {
+    const retries = 3;
+    const delays = [Duration(seconds: 0), Duration(seconds: 5), Duration(seconds: 10)];
+    for (var i = 0; i < retries; i++) {
+      if (_peers.containsKey(info.deviceId)) {
+        Log.i(_tag, 'Peer ${info.deviceName} already connected (by incoming), stopping retry');
+        return;
+      }
+      if (i > 0) {
+        Log.i(_tag, 'Retry ${i + 1}/$retries for ${info.deviceName} after ${delays[i].inSeconds}s');
+        await Future.delayed(delays[i]);
+      }
+      final success = await _attemptReconnect(info, sessionKey);
+      if (success) return;
+    }
+    Log.w(_tag, 'All reconnect attempts to ${info.deviceName} failed');
+  }
+
+  /// Returns true if TCP connected and request sent (doesn't mean auth completed).
+  Future<bool> _attemptReconnect(
       PairedPeerInfo info, List<int> sessionKey) async {
     Log.i(_tag,
         'Reconnecting to ${info.deviceName} (${info.lastKnownIp}:${info.lastKnownPort})');
 
     if (info.lastKnownPort <= 0) {
       Log.w(_tag, 'No port stored for ${info.deviceName}, skipping');
-      return;
+      return false;
     }
 
     try {
@@ -524,7 +545,7 @@ class PairingService {
       final connected = await peer.connect();
       if (!connected) {
         Log.w(_tag, 'Reconnect TCP failed to ${info.deviceName} — peer offline or port changed');
-        return;
+        return false;
       }
       Log.i(_tag, 'TCP connected to ${info.deviceName}, sending reconnect request...');
 
@@ -540,8 +561,10 @@ class PairingService {
         challenge: challenge,
       ));
       Log.i(_tag, 'Reconnect request sent to ${info.deviceName}: $sent');
+      return sent;
     } catch (e) {
       Log.e(_tag, 'Reconnect attempt error for ${info.deviceName}', e);
+      return false;
     }
   }
 
@@ -554,6 +577,13 @@ class PairingService {
     final tcpPort = message.meta['tcpPort'] as int? ?? 0;
 
     Log.i(_tag, '>>> Received reconnect REQUEST from $senderName ($senderId) tcpPort=$tcpPort');
+
+    // Already connected to this peer? Ignore duplicate.
+    if (_peers.containsKey(senderId)) {
+      Log.i(_tag, 'Already connected to $senderId, ignoring duplicate reconnect request');
+      await peer.send(Message.reject('Already connected'));
+      return;
+    }
 
     // Handle simultaneous reconnect: both sides try at the same time.
     // If we already have a pending outgoing reconnect to this device,

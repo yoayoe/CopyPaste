@@ -90,8 +90,10 @@ class AppService {
     _deviceId = prefs.getString('device_id') ?? const Uuid().v4();
     await prefs.setString('device_id', _deviceId);
 
-    // Initialize secure storage.
+    // Initialize secure storage and clear stale data from previous buggy sessions.
     secureStorage = SecureStorageService();
+    await secureStorage.clearAll();
+    Log.i(_tag, 'Cleared stale pairing data (one-time cleanup)');
 
     Log.i(_tag, 'Device: $_deviceName ($_deviceId)');
     Log.i(_tag, 'Local IP: $localIp');
