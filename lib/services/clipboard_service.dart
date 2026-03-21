@@ -39,9 +39,16 @@ class ClipboardService {
         if (imageChanged) return; // Image changed — skip text check.
       }
 
+      // Re-check suppression — writeImage may have been called while we were
+      // awaiting _pollImage above.
+      if (_isSuppressed) return;
+
       // Check text.
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final content = data?.text ?? '';
+
+      // Final suppression check before firing callback.
+      if (_isSuppressed) return;
 
       if (content.isNotEmpty && content != _lastContent) {
         _lastContent = content;
@@ -67,6 +74,10 @@ class ClipboardService {
       if (hash == _lastImageHash) return false;
 
       _lastImageHash = hash;
+
+      // Re-check suppression — writeImage may have been called while we were
+      // awaiting hash computation.
+      if (_isSuppressed) return false;
 
       Log.i(_tag, 'Image clipboard changed: ${imageBytes.length} bytes');
       onImageClipboardChanged?.call(imageBytes);
@@ -127,7 +138,7 @@ class ClipboardService {
 
   /// Suppress all change detection for a short window.
   void _suppress() {
-    _suppressUntil = DateTime.now().add(const Duration(seconds: 2));
+    _suppressUntil = DateTime.now().add(const Duration(seconds: 3));
   }
 
   Future<String> _hashBytes(Uint8List data) async {
