@@ -59,16 +59,28 @@ if [ ! -d "$APP_BUNDLE" ]; then
 fi
 echo "  Build complete: $APP_BUNDLE"
 
-# Step 2: Code sign (optional — ad-hoc if no identity)
+# Step 2: Code sign with entitlements
 echo ""
 echo "[2/4] Code signing..."
+ENTITLEMENTS="$PROJECT_DIR/macos/Runner/Release.entitlements"
+if [ ! -f "$ENTITLEMENTS" ]; then
+    echo "  WARNING: Release.entitlements not found at $ENTITLEMENTS"
+    ENTITLEMENTS=""
+fi
+
+SIGN_FLAGS="--deep --force --options runtime"
+if [ -n "$ENTITLEMENTS" ]; then
+    SIGN_FLAGS="$SIGN_FLAGS --entitlements $ENTITLEMENTS"
+    echo "  Entitlements: $ENTITLEMENTS"
+fi
+
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "[1-9] valid"; then
     IDENTITY=$(security find-identity -v -p codesigning | grep -m1 '"' | awk -F'"' '{print $2}')
     echo "  Signing with: $IDENTITY"
-    codesign --deep --force --sign "$IDENTITY" "$APP_BUNDLE"
+    codesign $SIGN_FLAGS --sign "$IDENTITY" "$APP_BUNDLE"
 else
     echo "  No signing identity found — using ad-hoc signing"
-    codesign --deep --force --sign - "$APP_BUNDLE"
+    codesign $SIGN_FLAGS --sign - "$APP_BUNDLE"
 fi
 echo "  Signed."
 
