@@ -8,7 +8,7 @@ set -e
 
 APP_NAME="copypaste"
 APP_DISPLAY_NAME="CopyPaste"
-APP_VERSION="0.3.0"
+APP_VERSION="0.4.0"
 APP_DESCRIPTION="Open-source clipboard sharing and file transfer over local network"
 APP_ID="com.copypaste.copypaste"
 MAINTAINER="CopyPaste Team <copypaste@localhost>"

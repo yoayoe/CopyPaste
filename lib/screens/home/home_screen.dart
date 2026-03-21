@@ -74,37 +74,65 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final appService = ref.read(appServiceProvider);
 
+    final pairedDesktops = ready ? appService.pairingService.peers.length : 0;
+    final mobileClients = webClients.length;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CopyPaste'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('CopyPaste'),
+            if (ready)
+              Text(
+                '${appService.localIp} · ${appService.deviceName}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+              ),
+          ],
+        ),
         actions: [
           if (ready) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Center(
-                child: SelectableText(
-                  'TCP: ${appService.tcpPort}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.outline,
-                      ),
+            // Connection summary chips.
+            if (pairedDesktops > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Chip(
+                  avatar: Icon(Icons.computer, size: 16,
+                      color: Theme.of(context).colorScheme.primary),
+                  label: Text('$pairedDesktops PC'),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Center(
-                child: Text(
-                  appService.webUrl,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
+            if (mobileClients > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Chip(
+                  avatar: Icon(Icons.phone_android, size: 16,
+                      color: Theme.of(context).colorScheme.primary),
+                  label: Text('$mobileClients Mobile'),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
-            ),
+            if (pairedDesktops == 0 && mobileClients == 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Center(
+                  child: Text(
+                    'No connections',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                  ),
+                ),
+              ),
           ],
           IconButton(
             icon: const Icon(Icons.qr_code),
-            tooltip: 'Show QR for mobile',
+            tooltip: 'Connect mobile browser',
             onPressed: () {
               if (ready) {
                 _showQrCode(context);
@@ -408,20 +436,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final appService = ref.read(appServiceProvider);
     showDialog(
       context: context,
-      builder: (_) => QrCodePanel(
-        url: appService.webUrl,
-        isTls: appService.isTlsEnabled,
-        onTlsToggle: (enabled) async {
-          await appService.setTlsEnabled(enabled);
-          if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('TLS ${enabled ? 'enabled' : 'disabled'} — restart app to apply'),
-              action: SnackBarAction(label: 'OK', onPressed: () {}),
-            ),
-          );
-        },
-      ),
+      builder: (_) => QrCodePanel(url: appService.webUrl),
     );
   }
 }

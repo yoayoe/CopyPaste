@@ -9,7 +9,7 @@
 $ErrorActionPreference = "Stop"
 
 $APP_DISPLAY_NAME = "CopyPaste"
-$APP_VERSION = "0.3.0"
+$APP_VERSION = "0.4.0"
 
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PROJECT_DIR = Split-Path -Parent $SCRIPT_DIR

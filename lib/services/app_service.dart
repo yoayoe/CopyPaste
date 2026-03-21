@@ -38,11 +38,7 @@ class AppService {
 
   String get deviceId => _deviceId;
   String get deviceName => _deviceName;
-  String get webUrl {
-    final scheme = webServer.isTls ? 'https' : 'http';
-    return '$scheme://$localIp:${webServer.port}';
-  }
-  bool get isTlsEnabled => webServer.isTls;
+  String get webUrl => 'https://$localIp:${webServer.port}';
   int get tcpPort => tcpServer.port;
   String localIp = '127.0.0.1';
 
@@ -130,25 +126,18 @@ class AppService {
     );
     _wirePairingCallbacks();
 
-    // 3. Start web server (desktop ↔ mobile) with optional TLS.
+    // 3. Start HTTPS web server (desktop ↔ mobile).
     webServer = EmbeddedWebServer(webClientPath: _webClientPath);
-    SecurityContext? securityContext;
 
-    final tlsEnabled = prefs.getBool('tls_enabled') ?? true;
-    if (tlsEnabled) {
-      final appSupportForTls = await getApplicationSupportDirectory();
-      _certManager = CertificateManager(
-        storageDir: '${appSupportForTls.path}/tls',
-      );
-      final certReady = await _certManager!.ensureCertificate(localIp: localIp);
-      if (certReady) {
-        securityContext = _certManager!.createSecurityContext();
-      }
-      if (securityContext == null) {
-        Log.w(_tag, 'TLS requested but unavailable — falling back to HTTP');
-      }
-    } else {
-      Log.i(_tag, 'TLS disabled by user preference');
+    final appSupportForTls = await getApplicationSupportDirectory();
+    _certManager = CertificateManager(
+      storageDir: '${appSupportForTls.path}/tls',
+    );
+    await _certManager!.ensureCertificate(localIp: localIp);
+    final securityContext = _certManager!.createSecurityContext();
+    if (securityContext == null) {
+      throw StateError('Failed to create TLS certificate. '
+          'Ensure openssl is installed on this system.');
     }
 
     final webPort = await webServer.start(
@@ -358,21 +347,6 @@ class AppService {
   /// Disconnect a paired desktop.
   Future<void> disconnectPeer(String deviceId) async {
     await pairingService.disconnectPeer(deviceId);
-  }
-
-  /// Toggle TLS on/off. Requires restart to take effect.
-  /// Returns the new TLS preference value.
-  Future<bool> setTlsEnabled(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('tls_enabled', enabled);
-    Log.i(_tag, 'TLS preference set to $enabled (restart required)');
-    return enabled;
-  }
-
-  /// Get current TLS preference (what will be used on next restart).
-  Future<bool> getTlsPreference() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('tls_enabled') ?? true;
   }
 
   /// Active web client sessions.

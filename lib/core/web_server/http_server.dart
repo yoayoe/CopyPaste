@@ -104,28 +104,14 @@ class EmbeddedWebServer {
 
   EmbeddedWebServer({required this.webClientPath});
 
-  /// Start the HTTP(S) + WebSocket server.
+  /// Start the HTTPS + WSS server.
   ///
-  /// If [securityContext] is provided, the server runs over TLS (HTTPS + WSS).
-  /// Otherwise, it falls back to plain HTTP + WS.
-  Future<int> start({int port = 0, SecurityContext? securityContext}) async {
-    if (securityContext != null) {
-      try {
-        _server = await HttpServer.bindSecure(
-          InternetAddress.anyIPv4, port, securityContext);
-        _isTls = true;
-        Log.i(_tag, 'Listening on port ${_server!.port} (HTTPS/WSS)');
-      } catch (e) {
-        Log.w(_tag, 'TLS bind failed, falling back to HTTP: $e');
-        _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-        _isTls = false;
-        Log.i(_tag, 'Listening on port ${_server!.port} (HTTP/WS — TLS fallback)');
-      }
-    } else {
-      _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-      _isTls = false;
-      Log.i(_tag, 'Listening on port ${_server!.port} (HTTP/WS)');
-    }
+  /// Requires a [securityContext] with a valid certificate and private key.
+  Future<int> start({int port = 0, required SecurityContext securityContext}) async {
+    _server = await HttpServer.bindSecure(
+      InternetAddress.anyIPv4, port, securityContext);
+    _isTls = true;
+    Log.i(_tag, 'Listening on port ${_server!.port} (HTTPS/WSS)');
 
     _server!.listen(_handleRequest);
 
