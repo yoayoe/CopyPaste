@@ -44,7 +44,7 @@ class AppService {
   DateTime _remoteWriteUntil = DateTime(0);
   bool get _writingFromRemote => DateTime.now().isBefore(_remoteWriteUntil);
   void _markRemoteWrite() {
-    _remoteWriteUntil = DateTime.now().add(const Duration(seconds: 10));
+    _remoteWriteUntil = DateTime.now().add(const Duration(seconds: 5));
   }
 
   /// Clipboard history for syncing to new web clients.
@@ -413,9 +413,8 @@ class AppService {
     }
     Log.d(_tag, 'Image clipboard changed: ${imageData.length} bytes');
 
-    // Suppress text detection in ClipboardService — copying an image also
-    // sets a text representation that we don't want to broadcast.
-    clipboard.suppressTextDetection();
+    // Suppress text detection — copying an image also sets a text representation.
+    _markRemoteWrite();
 
     // Save to temp file for web serving.
     final downloadId = await _saveImageForWeb(imageData);
