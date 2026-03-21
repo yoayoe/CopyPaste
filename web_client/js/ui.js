@@ -58,15 +58,21 @@ const UI = (() => {
       return;
     }
 
-    container.innerHTML = items.map(item => `
+    container.innerHTML = items.map(item => {
+      const isImage = item.type === 'image' && item.downloadId;
+      const contentHtml = isImage
+        ? `<img src="/api/download/${item.downloadId}" class="clipboard-image" alt="Clipboard image" loading="lazy">`
+        : `<div class="content">${escapeHtml(item.content)}</div>`;
+
+      return `
       <div class="history-item" data-id="${item.id}">
-        <div class="content">${escapeHtml(item.content)}</div>
+        ${contentHtml}
         <div class="meta">
           <span>${item.sourceDeviceName || 'This device'} &middot; ${timeAgo(item.timestamp)}</span>
-          <button class="copy-btn" onclick="App.copyItem('${item.id}')">Copy</button>
+          <button class="copy-btn" onclick="App.copyItem('${item.id}')">${isImage ? 'Download' : 'Copy'}</button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
 
   function renderDeviceList(devices) {

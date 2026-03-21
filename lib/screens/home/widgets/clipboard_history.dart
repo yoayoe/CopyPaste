@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pasteboard/pasteboard.dart';
 import '../../../models/clipboard_item.dart';
 
 class ClipboardHistory extends StatelessWidget {
@@ -23,7 +24,7 @@ class ClipboardHistory extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Copied text will appear here',
+              'Copied text or images will appear here',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -56,8 +57,24 @@ class _ClipboardItemTile extends StatelessWidget {
             ? '${age.inMinutes}m ago'
             : '${age.inHours}h ago';
 
+    final isImage = item.type == ClipboardItemType.image;
+
     return Card(
       child: ListTile(
+        leading: isImage && item.imageData != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.memory(
+                  item.imageData!,
+                  width: 48,
+                  height: 48,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.image, size: 48),
+                ),
+              )
+            : isImage
+                ? const Icon(Icons.image, size: 32)
+                : null,
         title: Text(
           item.preview,
           maxLines: 2,
@@ -67,16 +84,26 @@ class _ClipboardItemTile extends StatelessWidget {
           '${item.sourceDeviceName ?? "This device"} • $ageText',
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.copy),
-          tooltip: 'Copy',
+          icon: Icon(isImage ? Icons.content_copy : Icons.copy),
+          tooltip: isImage ? 'Copy image' : 'Copy',
           onPressed: () {
-            Clipboard.setData(ClipboardData(text: item.content));
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Copied to clipboard'),
-                duration: Duration(seconds: 1),
-              ),
-            );
+            if (isImage && item.imageData != null) {
+              Pasteboard.writeImage(item.imageData!);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Image copied to clipboard'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            } else {
+              Clipboard.setData(ClipboardData(text: item.content));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Copied to clipboard'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            }
           },
         ),
       ),

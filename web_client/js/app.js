@@ -242,7 +242,13 @@ const App = (() => {
 
   function copyItem(id) {
     const item = clipboardHistory.find(i => i.id === id);
-    if (item) {
+    if (!item) return;
+
+    if (item.type === 'image' && item.downloadId) {
+      // Download image for mobile.
+      Transfer.download(item.downloadId, 'clipboard_image.png');
+      UI.toast('Downloading image...');
+    } else {
       Clip.write(item.content).then(ok => {
         UI.toast(ok ? 'Copied!' : 'Copy failed');
       });

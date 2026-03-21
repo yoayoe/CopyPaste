@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../core/discovery/discovery_service.dart';
 import '../core/network/tcp_server.dart';
@@ -51,6 +52,8 @@ class AppService {
   void Function(List<({String name, String ip})> clients)? onWebClientsChanged;
   void Function(String content, String? sourceDeviceId, String? sourceDeviceName)?
       onClipboardReceived;
+  void Function(Uint8List imageData, String? sourceDeviceId,
+      String? sourceDeviceName, String? downloadUrl)? onImageClipboardReceived;
 
   /// Pairing callbacks.
   void Function(String deviceId, String deviceName, String platform, String pin)?
@@ -147,8 +150,11 @@ class AppService {
       }
     };
 
-    // 4. Start clipboard monitoring.
-    clipboard = ClipboardService(onClipboardChanged: _onClipboardChanged);
+    // 4. Start clipboard monitoring (text + image).
+    clipboard = ClipboardService(
+      onClipboardChanged: _onClipboardChanged,
+      onImageClipboardChanged: _onImageClipboardChanged,
+    );
     clipboard.startMonitoring();
 
     // 5. Initialize file transfer service.
@@ -237,6 +243,28 @@ class AppService {
     pairingService.onFileReceived = (message) {
       fileTransfer.handleFileMessage(message);
     };
+    pairingService.onImageClipboardReceived =
+        (imageData, mimeType, sourceId, sourceName) async {
+      Log.d(_tag, 'Image from paired desktop: $sourceName (${imageData.length} bytes)');
+      clipboard.writeImage(imageData);
+
+      // Save to temp file for web serving.
+      final downloadId = await _saveImageForWeb(imageData);
+
+      final item = {
+        'id': const Uuid().v4(),
+        'type': 'image',
+        'content': '[Image: ${_formatSize(imageData.length)}]',
+        'sourceDeviceId': sourceId,
+        'sourceDeviceName': sourceName,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        if (downloadId != null) 'downloadId': downloadId,
+      };
+      _addToHistory(item);
+      webServer.broadcast('clipboard:update', item);
+      onImageClipboardReceived?.call(imageData, sourceId, sourceName, downloadId);
+    };
+
     pairingService.onClipboardReceived = (content, sourceId, sourceName) {
       Log.d(_tag, 'Clipboard from paired desktop: $sourceName (${content.length} chars)');
       clipboard.write(content);
@@ -366,6 +394,53 @@ class AppService {
     _transferHistory.insert(0, data);
     if (_transferHistory.length > 50) _transferHistory.removeLast();
     webServer.broadcast('transfer:complete', data);
+  }
+
+  Future<void> _onImageClipboardChanged(Uint8List imageData) async {
+    Log.d(_tag, 'Image clipboard changed: ${imageData.length} bytes');
+
+    // Save to temp file for web serving.
+    final downloadId = await _saveImageForWeb(imageData);
+
+    final item = {
+      'id': const Uuid().v4(),
+      'type': 'image',
+      'content': '[Image: ${_formatSize(imageData.length)}]',
+      'sourceDeviceId': _deviceId,
+      'sourceDeviceName': _deviceName,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      if (downloadId != null) 'downloadId': downloadId,
+    };
+    _addToHistory(item);
+
+    // Push to mobile browsers.
+    webServer.broadcast('clipboard:update', item);
+
+    onImageClipboardReceived?.call(imageData, null, _deviceName, downloadId);
+
+    // Send to paired desktops via TCP.
+    pairingService.broadcastImage(imageData, _deviceId, _deviceName);
+  }
+
+  /// Save image bytes to temp file and register for web download.
+  Future<String?> _saveImageForWeb(Uint8List imageData) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final fileName = 'clipboard_${DateTime.now().millisecondsSinceEpoch}.png';
+      final file = File('${tempDir.path}/copypaste_images/$fileName');
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(imageData);
+      return webServer.addFileForDownload(file.path, fileName, '');
+    } catch (e) {
+      Log.e(_tag, 'Failed to save image for web', e);
+      return null;
+    }
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1048576).toStringAsFixed(1)} MB';
   }
 
   void _onClipboardChanged(String content) {

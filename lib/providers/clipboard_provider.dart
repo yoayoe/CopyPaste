@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../models/clipboard_item.dart';
@@ -20,6 +21,28 @@ class ClipboardNotifier extends StateNotifier<List<ClipboardItem>> {
       sourceDeviceId: sourceDeviceId,
       sourceDeviceName: sourceDeviceName,
       timestamp: DateTime.now(),
+    );
+
+    state = [item, ...state.take(kMaxClipboardHistory - 1)];
+  }
+
+  void addImage(Uint8List imageData,
+      {String? sourceDeviceId, String? sourceDeviceName, String? downloadId}) {
+    final sizeStr = imageData.length < 1024
+        ? '${imageData.length} B'
+        : imageData.length < 1048576
+            ? '${(imageData.length / 1024).toStringAsFixed(1)} KB'
+            : '${(imageData.length / 1048576).toStringAsFixed(1)} MB';
+
+    final item = ClipboardItem(
+      id: _uuid.v4(),
+      type: ClipboardItemType.image,
+      content: '[Image: $sizeStr]',
+      sourceDeviceId: sourceDeviceId,
+      sourceDeviceName: sourceDeviceName,
+      timestamp: DateTime.now(),
+      imageData: imageData,
+      downloadId: downloadId,
     );
 
     state = [item, ...state.take(kMaxClipboardHistory - 1)];

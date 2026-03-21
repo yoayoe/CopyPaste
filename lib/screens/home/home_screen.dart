@@ -188,6 +188,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           );
     };
 
+    appService.onImageClipboardReceived =
+        (imageData, sourceId, sourceName, downloadId) {
+      ref.read(clipboardProvider.notifier).addImage(
+            imageData,
+            sourceDeviceId: sourceId,
+            sourceDeviceName: sourceName,
+            downloadId: downloadId,
+          );
+    };
+
     appService.onWebClientsChanged = (clients) {
       // Use session info for richer client state.
       final sessions = appService.webClientSessions;

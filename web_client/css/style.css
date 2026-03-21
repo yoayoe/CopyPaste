@@ -208,6 +208,14 @@ h2 {
   overflow: hidden;
 }
 
+.history-item .clipboard-image {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: contain;
+  display: block;
+}
+
 .history-item .meta {
   display: flex;
   justify-content: space-between;

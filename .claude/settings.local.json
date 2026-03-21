@@ -11,7 +11,8 @@
       "Bash(/home/yoayoe/flutter/bin/flutter build:*)",
       "Bash(/home/yoayoe/flutter/bin/flutter run:*)",
       "Bash(/home/yoayoe/flutter/bin/flutter pub:*)",
-      "Bash(sudo apt-get:*)"
+      "Bash(sudo apt-get:*)",
+      "Bash(/home/yoayoe/flutter/bin/dart analyze:*)"
     ]
   }
 }
