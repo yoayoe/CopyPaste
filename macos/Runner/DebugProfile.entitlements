@@ -14,5 +14,9 @@
 	<true/>
 	<key>com.apple.security.files.downloads.read-write</key>
 	<true/>
+	<key>com.apple.security.keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.copypaste.copypaste</string>
+	</array>
 </dict>
 </plist>

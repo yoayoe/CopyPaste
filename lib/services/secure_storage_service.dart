@@ -53,6 +53,8 @@ class SecureStorageService {
   /// Save a paired peer's info and session key.
   Future<void> savePairedPeer(PairedPeerInfo info, List<int> sessionKey) async {
     try {
+      Log.i(_tag, 'Saving peer: ${info.deviceName} (${info.deviceId}) at ${info.lastKnownIp}:${info.lastKnownPort}');
+
       // Save session key separately.
       final keyB64 = base64Encode(sessionKey);
       await _storage.write(
@@ -60,10 +62,19 @@ class SecureStorageService {
         value: keyB64,
       );
 
+      // Verify key was written.
+      final verifyKey = await _storage.read(key: '$_sessionKeyPrefix${info.deviceId}');
+      Log.i(_tag, 'Session key saved: ${verifyKey != null ? 'YES' : 'NO (FAILED!)'}');
+
       // Update peer list.
       final peers = await _loadPeerMap();
       peers[info.deviceId] = info.toJson();
-      await _storage.write(key: _peerListKey, value: jsonEncode(peers));
+      final peerJson = jsonEncode(peers);
+      await _storage.write(key: _peerListKey, value: peerJson);
+
+      // Verify peer list was written.
+      final verifyPeers = await _storage.read(key: _peerListKey);
+      Log.i(_tag, 'Peer list saved: ${verifyPeers != null ? 'YES (${verifyPeers.length} bytes)' : 'NO (FAILED!)'}');
 
       Log.i(_tag, 'Saved peer: ${info.deviceName} (${info.deviceId})');
     } catch (e) {
@@ -91,6 +102,7 @@ class SecureStorageService {
     final result = <String, (PairedPeerInfo, List<int>)>{};
     try {
       final peers = await _loadPeerMap();
+      Log.i(_tag, 'Raw peer map has ${peers.length} entries: ${peers.keys.toList()}');
 
       for (final entry in peers.entries) {
         final info = PairedPeerInfo.fromJson(
@@ -100,6 +112,9 @@ class SecureStorageService {
         if (keyB64 != null) {
           final sessionKey = base64Decode(keyB64);
           result[info.deviceId] = (info, sessionKey);
+          Log.i(_tag, 'Loaded peer: ${info.deviceName} (${info.deviceId}) at ${info.lastKnownIp}:${info.lastKnownPort}');
+        } else {
+          Log.w(_tag, 'No session key found for ${info.deviceName} (${info.deviceId})');
         }
       }
 
