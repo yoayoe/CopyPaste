@@ -39,6 +39,9 @@ class AppService {
   int get tcpPort => tcpServer.port;
   String localIp = '127.0.0.1';
 
+  /// Flag to suppress local clipboard detection after writing from remote.
+  bool _writingFromRemote = false;
+
   /// Clipboard history for syncing to new web clients.
   final List<Map<String, dynamic>> _clipboardHistory = [];
 
@@ -246,7 +249,10 @@ class AppService {
     pairingService.onImageClipboardReceived =
         (imageData, mimeType, sourceId, sourceName) async {
       Log.d(_tag, 'Image from paired desktop: $sourceName (${imageData.length} bytes)');
-      clipboard.writeImage(imageData);
+      _writingFromRemote = true;
+      await clipboard.writeImage(imageData);
+      // Keep flag for a bit to suppress re-detection.
+      Future.delayed(const Duration(seconds: 3), () => _writingFromRemote = false);
 
       // Save to temp file for web serving.
       final downloadId = await _saveImageForWeb(imageData);
@@ -267,7 +273,9 @@ class AppService {
 
     pairingService.onClipboardReceived = (content, sourceId, sourceName) {
       Log.d(_tag, 'Clipboard from paired desktop: $sourceName (${content.length} chars)');
+      _writingFromRemote = true;
       clipboard.write(content);
+      Future.delayed(const Duration(seconds: 3), () => _writingFromRemote = false);
       onClipboardReceived?.call(content, sourceId, sourceName);
 
       final item = {
@@ -397,6 +405,10 @@ class AppService {
   }
 
   Future<void> _onImageClipboardChanged(Uint8List imageData) async {
+    if (_writingFromRemote) {
+      Log.d(_tag, 'Image clipboard changed (from remote, ignoring): ${imageData.length} bytes');
+      return;
+    }
     Log.d(_tag, 'Image clipboard changed: ${imageData.length} bytes');
 
     // Save to temp file for web serving.
@@ -444,6 +456,10 @@ class AppService {
   }
 
   void _onClipboardChanged(String content) {
+    if (_writingFromRemote) {
+      Log.d(_tag, 'Clipboard changed (from remote, ignoring): ${content.length} chars');
+      return;
+    }
     Log.d(_tag, 'Clipboard changed: ${content.length} chars');
 
     final item = {
@@ -476,7 +492,9 @@ class AppService {
         final content = data['content'] as String?;
         if (content != null && content.isNotEmpty) {
           Log.d(_tag, 'Clipboard from mobile: ${content.length} chars');
+          _writingFromRemote = true;
           clipboard.write(content);
+          Future.delayed(const Duration(seconds: 3), () => _writingFromRemote = false);
           onClipboardReceived?.call(content, 'mobile', 'Mobile Browser');
 
           final item = {
