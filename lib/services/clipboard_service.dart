@@ -13,8 +13,13 @@ class ClipboardService {
   String _lastContent = '';
   String _lastImageHash = '';
 
-  /// Timestamp-based suppression: ignore changes until this time.
-  DateTime _suppressUntil = DateTime(0);
+  /// Counter-based suppression: absorb the next N image change detections.
+  /// This is NOT time-dependent — it absorbs re-detections caused by OS
+  /// re-encoding after writeImage, regardless of how long the OS takes.
+  int _absorbImageChanges = 0;
+
+  /// Counter-based suppression for text changes after writing.
+  int _absorbTextChanges = 0;
 
   final void Function(String content)? onClipboardChanged;
   final void Function(Uint8List imageData)? onImageClipboardChanged;
@@ -27,11 +32,14 @@ class ClipboardService {
     Log.i(_tag, 'Monitoring started');
   }
 
-  bool get _isSuppressed => DateTime.now().isBefore(_suppressUntil);
+  /// Called by AppService when a local image is detected, to suppress the
+  /// text representation that accompanies image clipboard data.
+  void suppressTextDetection() {
+    _absorbTextChanges = 5;
+    Log.d(_tag, 'Text detection suppressed (5 cycles)');
+  }
 
   Future<void> _poll() async {
-    if (_isSuppressed) return;
-
     try {
       // Check image clipboard first (higher priority).
       if (onImageClipboardChanged != null) {
@@ -39,19 +47,20 @@ class ClipboardService {
         if (imageChanged) return; // Image changed — skip text check.
       }
 
-      // Re-check suppression — writeImage may have been called while we were
-      // awaiting _pollImage above.
-      if (_isSuppressed) return;
-
       // Check text.
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final content = data?.text ?? '';
 
-      // Final suppression check before firing callback.
-      if (_isSuppressed) return;
-
       if (content.isNotEmpty && content != _lastContent) {
         _lastContent = content;
+
+        // Absorb text changes after image write or local image detection.
+        if (_absorbTextChanges > 0) {
+          _absorbTextChanges--;
+          Log.d(_tag, 'Absorbed text change ($_absorbTextChanges remaining)');
+          return;
+        }
+
         onClipboardChanged?.call(content);
       }
     } catch (e) {
@@ -59,7 +68,7 @@ class ClipboardService {
     }
   }
 
-  /// Returns true if a new image was detected.
+  /// Returns true if a new image was detected (or absorbed).
   Future<bool> _pollImage() async {
     try {
       final imageBytes = await Pasteboard.image;
@@ -73,18 +82,21 @@ class ClipboardService {
       final hash = await _hashBytes(imageBytes);
       if (hash == _lastImageHash) return false;
 
+      // Hash changed — either genuine user copy or re-encoded write.
       _lastImageHash = hash;
 
-      // Re-check suppression — writeImage may have been called while we were
-      // awaiting hash computation.
-      if (_isSuppressed) return false;
-
-      // Capture text representation BEFORE firing callback, so the next
-      // text poll won't re-fire for the image's text representation.
+      // Capture text representation to prevent double-fire.
       try {
         final data = await Clipboard.getData(Clipboard.kTextPlain);
         _lastContent = data?.text ?? _lastContent;
       } catch (_) {}
+
+      // If we're absorbing changes after a writeImage, consume silently.
+      if (_absorbImageChanges > 0) {
+        _absorbImageChanges--;
+        Log.d(_tag, 'Absorbed image re-detection: ${imageBytes.length} bytes ($_absorbImageChanges remaining)');
+        return true; // Return true to also skip text check.
+      }
 
       Log.i(_tag, 'Image clipboard changed: ${imageBytes.length} bytes');
       onImageClipboardChanged?.call(imageBytes);
@@ -98,7 +110,7 @@ class ClipboardService {
   /// Write text to the system clipboard.
   Future<void> write(String text) async {
     _lastContent = text;
-    _suppress();
+    _absorbTextChanges = 3;
     await Clipboard.setData(ClipboardData(text: text));
     Log.d(_tag, 'Written ${text.length} chars');
   }
@@ -111,19 +123,22 @@ class ClipboardService {
 
   /// Write image (PNG) to the system clipboard.
   Future<void> writeImage(Uint8List imageData) async {
-    // Suppress immediately to block any in-flight polls.
-    _suppress();
+    // Set absorb counters BEFORE writing — any poll that sees the change
+    // will be absorbed, regardless of timing.
+    _absorbImageChanges = 5;
+    _absorbTextChanges = 5;
+
     await Pasteboard.writeImage(imageData);
 
-    // Wait for OS clipboard to settle (macOS re-encodes PNG asynchronously).
+    // Wait for OS clipboard to settle (macOS re-encodes PNG).
     await Future.delayed(const Duration(milliseconds: 500));
 
-    // Read back the actual hash (pasteboard may re-encode to different bytes).
+    // Read back the actual hash so future polls see "no change".
     try {
       final readBack = await Pasteboard.image;
       if (readBack != null) {
         _lastImageHash = await _hashBytes(readBack);
-        Log.d(_tag, 'writeImage readback: ${readBack.length} bytes, hash updated');
+        Log.d(_tag, 'writeImage readback: ${readBack.length} bytes');
       } else {
         Log.w(_tag, 'writeImage readback returned null');
       }
@@ -131,14 +146,11 @@ class ClipboardService {
       Log.w(_tag, 'writeImage readback failed: $e');
     }
 
-    // Also capture whatever text representation was set.
+    // Also capture text representation.
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       if (data?.text != null) _lastContent = data!.text!;
     } catch (_) {}
-
-    // Re-suppress AFTER readback — the full duration starts now.
-    _suppress();
 
     Log.d(_tag, 'Written image: ${imageData.length} bytes');
   }
@@ -146,11 +158,6 @@ class ClipboardService {
   /// Read current clipboard image.
   Future<Uint8List?> readImage() async {
     return await Pasteboard.image;
-  }
-
-  /// Suppress all change detection for a short window.
-  void _suppress() {
-    _suppressUntil = DateTime.now().add(const Duration(seconds: 5));
   }
 
   Future<String> _hashBytes(Uint8List data) async {

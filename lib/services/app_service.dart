@@ -413,8 +413,9 @@ class AppService {
     }
     Log.d(_tag, 'Image clipboard changed: ${imageData.length} bytes');
 
-    // Suppress text detection — copying an image also sets a text representation.
-    _markRemoteWrite();
+    // Suppress text detection in ClipboardService — copying an image also
+    // sets a text representation that we don't want to broadcast.
+    clipboard.suppressTextDetection();
 
     // Save to temp file for web serving.
     final downloadId = await _saveImageForWeb(imageData);
