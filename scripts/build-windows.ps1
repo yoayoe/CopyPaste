@@ -68,20 +68,17 @@ if (Test-Path $ICON_SRC) {
 
     # Try Python Pillow as fallback
     if (-not $iconConverted) {
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if (-not $pythonCmd) {
-            $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue
-        }
-        if ($pythonCmd) {
-            Write-Host "  Trying Python Pillow..."
-            $iconSrcEscaped = $ICON_SRC -replace "\\", "\\\\"
-            $iconDstEscaped = $ICON_DST -replace "\\", "\\\\"
+        try {
+            $ErrorActionPreference = "SilentlyContinue"
             $pyCode = "from PIL import Image; img = Image.open(r'$ICON_SRC'); img.save(r'$ICON_DST', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]); print('OK')"
-            $pyResult = & python -c $pyCode 2>&1
+            $pyResult = & python -c $pyCode 2>$null
+            $ErrorActionPreference = "Stop"
             if ("$pyResult" -match "OK") {
                 $iconConverted = $true
-                Write-Host "  Icon converted: $ICON_DST"
+                Write-Host "  Icon converted with Python Pillow: $ICON_DST"
             }
+        } catch {
+            $ErrorActionPreference = "Stop"
         }
     }
 
