@@ -83,10 +83,11 @@ class _TransferTile extends StatelessWidget {
 
     // Open the containing folder.
     final dir = file.parent.path;
-    if (Platform.isMacOS) {
+    if (Platform.isWindows) {
+      Process.run('explorer', ['/select,', path]);
+    } else if (Platform.isMacOS) {
       Process.run('open', ['-R', path]);
     } else if (Platform.isLinux) {
-      // Try xdg-open on the directory, or the file manager.
       Process.run('xdg-open', [dir]);
     }
 
