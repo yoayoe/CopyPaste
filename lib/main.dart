@@ -13,6 +13,9 @@ final appServiceProvider = Provider<AppService>((ref) => AppService());
 /// Tracks whether services have started.
 final servicesReadyProvider = StateProvider<bool>((ref) => false);
 
+/// Holds startup error message if services failed to start.
+final startupErrorProvider = StateProvider<String?>((ref) => null);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -81,6 +84,7 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> {
     } catch (e, stack) {
       debugPrint('[CopyPaste] Failed to start services: $e');
       debugPrint('[CopyPaste] Stack: $stack');
+      ref.read(startupErrorProvider.notifier).state = e.toString();
     }
   }
 

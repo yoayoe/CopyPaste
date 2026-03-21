@@ -46,10 +46,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final ready = ref.watch(servicesReadyProvider);
+    final startupError = ref.watch(startupErrorProvider);
     final devices = ref.watch(deviceProvider);
     final clipboardItems = ref.watch(clipboardProvider);
     final transfers = ref.watch(transferProvider);
     final webClients = ref.watch(webClientsProvider);
+
+    if (startupError != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('CopyPaste')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.error_outline, size: 64,
+                    color: Theme.of(context).colorScheme.error),
+                const SizedBox(height: 16),
+                Text('Failed to start',
+                    style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 8),
+                Text(
+                  startupError,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                if (startupError.contains('openssl')) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'On Windows, install Git for Windows (includes openssl)\n'
+                    'or install OpenSSL separately.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     if (ready && !_callbacksWired) {
       _callbacksWired = true;
