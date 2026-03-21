@@ -72,15 +72,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
-                if (startupError.contains('openssl')) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'On Windows, install Git for Windows (includes openssl)\n'
-                    'or install OpenSSL separately.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
               ],
             ),
           ),

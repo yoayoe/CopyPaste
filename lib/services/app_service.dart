@@ -136,8 +136,7 @@ class AppService {
     await _certManager!.ensureCertificate(localIp: localIp);
     final securityContext = _certManager!.createSecurityContext();
     if (securityContext == null) {
-      throw StateError('Failed to create TLS certificate. '
-          'Ensure openssl is installed on this system.');
+      throw StateError('Failed to create TLS certificate.');
     }
 
     final webPort = await webServer.start(
