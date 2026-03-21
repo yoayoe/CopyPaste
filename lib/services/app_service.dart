@@ -96,12 +96,13 @@ class AppService {
     Log.i(_tag, 'Device: $_deviceName ($_deviceId)');
     Log.i(_tag, 'Local IP: $localIp');
 
-    // 1. Start TCP server (desktop ↔ desktop).
+    // 1. Start TCP server (desktop ↔ desktop) on a stable port.
     tcpServer = TcpServer(onConnection: (socket) {
       // Hand off to pairing service.
       pairingService.handleIncomingConnection(socket);
     });
-    final tcpPort = await tcpServer.start();
+    final preferredTcpPort = await findAvailablePort(kTcpPortMin, kTcpPortMax);
+    final tcpPort = await tcpServer.start(port: preferredTcpPort);
 
     // 2. Initialize pairing service.
     pairingService = PairingService(
@@ -209,8 +210,10 @@ class AppService {
     Log.i(_tag, 'Started — TCP: $tcpPort, Web: $webPort');
     Log.i(_tag, 'Mobile URL: $webUrl');
 
-    // 7. Reconnect to previously paired peers.
-    pairingService.reconnectToKnownPeers();
+    // 7. Reconnect to previously paired peers (with delay for peer startup).
+    Future.delayed(const Duration(seconds: 3), () {
+      pairingService.reconnectToKnownPeers();
+    });
   }
 
   void _wirePairingCallbacks() {

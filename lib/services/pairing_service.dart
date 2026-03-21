@@ -249,10 +249,12 @@ class PairingService {
     final senderId = message.meta['sender'] as String;
     final senderName = message.meta['senderName'] as String? ?? 'Unknown';
     final platform = message.meta['platform'] as String? ?? 'unknown';
+    final tcpPort = message.meta['tcpPort'] as int? ?? 0;
 
     // Update peer info.
     peer.deviceName = senderName;
     peer.platform = platform;
+    peer.remoteTcpPort = tcpPort;
 
     // Generate 6-digit PIN and nonce.
     final pin = _generatePin();
@@ -346,9 +348,11 @@ class PairingService {
     final senderId = message.meta['sender'] as String;
     final senderName = message.meta['senderName'] as String? ?? 'Unknown';
     final platform = message.meta['platform'] as String? ?? 'unknown';
+    final tcpPort = message.meta['tcpPort'] as int? ?? 0;
 
     peer.deviceName = senderName;
     peer.platform = platform;
+    peer.remoteTcpPort = tcpPort;
 
     // Session key was pre-derived in submitPinAndDeriveKey().
     if (_pendingOutgoing == peer && _lastSessionKey != null) {
@@ -460,16 +464,26 @@ class PairingService {
 
   /// Try to reconnect to all previously paired peers.
   Future<void> reconnectToKnownPeers() async {
-    if (secureStorage == null) return;
+    if (secureStorage == null) {
+      Log.w(_tag, 'No secure storage — cannot reconnect');
+      return;
+    }
     final knownPeers = await secureStorage!.loadAllPairedPeers();
-    if (knownPeers.isEmpty) return;
+    if (knownPeers.isEmpty) {
+      Log.i(_tag, 'No known peers to reconnect');
+      return;
+    }
 
     Log.i(_tag, 'Attempting reconnect to ${knownPeers.length} known peers');
     for (final entry in knownPeers.entries) {
       final info = entry.value.$1;
       final sessionKey = entry.value.$2;
+      Log.i(_tag, 'Known peer: ${info.deviceName} (${info.lastKnownIp}:${info.lastKnownPort}), key length: ${sessionKey.length}');
       // Don't reconnect to peers already connected.
-      if (_peers.containsKey(info.deviceId)) continue;
+      if (_peers.containsKey(info.deviceId)) {
+        Log.i(_tag, 'Peer ${info.deviceName} already connected, skipping');
+        continue;
+      }
       _attemptReconnect(info, sessionKey);
     }
   }
@@ -546,6 +560,7 @@ class PairingService {
 
     peer.deviceName = senderName;
     peer.platform = platform;
+    peer.remoteTcpPort = tcpPort;
 
     // Store temporarily to verify their response.
     _pendingReconnects[senderId] = (peer, ourChallenge, sessionKey);
@@ -623,15 +638,18 @@ class PairingService {
   }
 
   Future<void> _finalizeReconnect(String deviceId, PeerConnection peer,
-      String name, String platform, List<int> sessionKey, int port) async {
+      String name, String platform, List<int> sessionKey, int remoteTcpPort) async {
     peer.deviceName = name;
     peer.platform = platform;
     peer.sessionKey = sessionKey;
+    peer.remoteTcpPort = remoteTcpPort;
     peer.state = PeerState.paired;
     _peers[deviceId] = peer;
 
-    // Update stored IP/port.
-    await secureStorage?.updatePeerAddress(deviceId, peer.ip, port);
+    // Update stored IP/port with the remote device's TCP server port.
+    if (remoteTcpPort > 0) {
+      await secureStorage?.updatePeerAddress(deviceId, peer.ip, remoteTcpPort);
+    }
 
     onPeerPaired?.call(deviceId, name, platform, peer.ip);
     Log.i(_tag, 'Reconnected with $name ($deviceId)');
@@ -639,13 +657,15 @@ class PairingService {
 
   void _savePeerToStorage(String deviceId, PeerConnection peer) {
     if (secureStorage == null || peer.sessionKey == null) return;
+    final port = peer.remoteTcpPort ?? peer.port;
+    Log.i(_tag, 'Saving peer $deviceId to storage (${peer.ip}:$port)');
     secureStorage!.savePairedPeer(
       PairedPeerInfo(
         deviceId: deviceId,
         deviceName: peer.deviceName,
         platform: peer.platform,
         lastKnownIp: peer.ip,
-        lastKnownPort: peer.port,
+        lastKnownPort: port,
       ),
       peer.sessionKey!,
     );

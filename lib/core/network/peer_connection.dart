@@ -20,6 +20,10 @@ class PeerConnection {
   final List<int> _buffer = [];
   PeerState state;
 
+  /// The remote device's TCP server port (for reconnection).
+  /// Different from [port] which may be an ephemeral socket port.
+  int? remoteTcpPort;
+
   /// HMAC session key derived from PIN pairing.
   List<int>? sessionKey;
 

@@ -14,6 +14,10 @@ const kChunkSize = 64 * 1024;
 /// Maximum clipboard history items.
 const kMaxClipboardHistory = 50;
 
+/// TCP server default port range (desktop ↔ desktop).
+const kTcpPortMin = 9090;
+const kTcpPortMax = 9099;
+
 /// Web server default port range.
 const kWebPortMin = 8080;
 const kWebPortMax = 8099;
