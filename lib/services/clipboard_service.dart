@@ -79,15 +79,15 @@ class ClipboardService {
       // awaiting hash computation.
       if (_isSuppressed) return false;
 
-      Log.i(_tag, 'Image clipboard changed: ${imageBytes.length} bytes');
-      onImageClipboardChanged?.call(imageBytes);
-
-      // Also update _lastContent to whatever text is on clipboard now,
-      // so we don't double-fire a text event for the image's text representation.
+      // Capture text representation BEFORE firing callback, so the next
+      // text poll won't re-fire for the image's text representation.
       try {
         final data = await Clipboard.getData(Clipboard.kTextPlain);
         _lastContent = data?.text ?? _lastContent;
       } catch (_) {}
+
+      Log.i(_tag, 'Image clipboard changed: ${imageBytes.length} bytes');
+      onImageClipboardChanged?.call(imageBytes);
 
       return true;
     } catch (e) {
@@ -111,22 +111,34 @@ class ClipboardService {
 
   /// Write image (PNG) to the system clipboard.
   Future<void> writeImage(Uint8List imageData) async {
+    // Suppress immediately to block any in-flight polls.
     _suppress();
     await Pasteboard.writeImage(imageData);
 
-    // Read back the actual hash (pasteboard may re-encode).
+    // Wait for OS clipboard to settle (macOS re-encodes PNG asynchronously).
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Read back the actual hash (pasteboard may re-encode to different bytes).
     try {
       final readBack = await Pasteboard.image;
       if (readBack != null) {
         _lastImageHash = await _hashBytes(readBack);
+        Log.d(_tag, 'writeImage readback: ${readBack.length} bytes, hash updated');
+      } else {
+        Log.w(_tag, 'writeImage readback returned null');
       }
-    } catch (_) {}
+    } catch (e) {
+      Log.w(_tag, 'writeImage readback failed: $e');
+    }
 
     // Also capture whatever text representation was set.
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       if (data?.text != null) _lastContent = data!.text!;
     } catch (_) {}
+
+    // Re-suppress AFTER readback — the full duration starts now.
+    _suppress();
 
     Log.d(_tag, 'Written image: ${imageData.length} bytes');
   }
@@ -138,7 +150,7 @@ class ClipboardService {
 
   /// Suppress all change detection for a short window.
   void _suppress() {
-    _suppressUntil = DateTime.now().add(const Duration(seconds: 3));
+    _suppressUntil = DateTime.now().add(const Duration(seconds: 5));
   }
 
   Future<String> _hashBytes(Uint8List data) async {

@@ -44,7 +44,7 @@ class AppService {
   DateTime _remoteWriteUntil = DateTime(0);
   bool get _writingFromRemote => DateTime.now().isBefore(_remoteWriteUntil);
   void _markRemoteWrite() {
-    _remoteWriteUntil = DateTime.now().add(const Duration(seconds: 5));
+    _remoteWriteUntil = DateTime.now().add(const Duration(seconds: 10));
   }
 
   /// Clipboard history for syncing to new web clients.
