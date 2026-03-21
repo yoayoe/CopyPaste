@@ -14,7 +14,10 @@ enum MessageType {
   pairResponse(0x12),
   pairConfirm(0x13),
   // Connection control.
-  disconnect(0x14);
+  disconnect(0x14),
+  // Reconnect handshake (session key re-auth).
+  reconnectRequest(0x15),
+  reconnectConfirm(0x16);
 
   final int code;
   const MessageType(this.code);

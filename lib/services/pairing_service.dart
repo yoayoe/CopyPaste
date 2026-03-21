@@ -7,6 +7,7 @@ import '../core/network/peer_connection.dart';
 import '../core/protocol/message.dart';
 import '../core/protocol/message_type.dart';
 import '../utils/logger.dart';
+import 'secure_storage_service.dart';
 
 const _tag = 'Pairing';
 
@@ -66,12 +67,15 @@ class PairingService {
   /// Pairing failed or rejected.
   void Function(String deviceId, String reason)? onPairFailed;
 
+  final SecureStorageService? secureStorage;
+
   PairingService({
     required this.localDeviceId,
     required this.localDeviceName,
     required this.localPlatform,
     required this.localTcpPort,
     required this.localWebPort,
+    this.secureStorage,
   });
 
   List<PeerConnection> get peers => _peers.values.toList();
@@ -181,13 +185,15 @@ class PairingService {
     }
   }
 
-  /// Disconnect a specific peer.
+  /// Disconnect and unpair a specific peer.
   Future<void> disconnectPeer(String deviceId) async {
     final peer = _peers.remove(deviceId);
     if (peer != null) {
       await peer.close();
       onPeerDisconnected?.call(deviceId);
     }
+    // Remove from secure storage (unpair).
+    await secureStorage?.removePairedPeer(deviceId);
   }
 
   /// Disconnect all peers.
@@ -226,6 +232,10 @@ class PairingService {
         peer.send(Message.pong(localDeviceId));
       case MessageType.pong:
         Log.d(_tag, 'Pong from ${peer.deviceName}');
+      case MessageType.reconnectRequest:
+        _handleReconnectRequest(message, peer);
+      case MessageType.reconnectConfirm:
+        _handleReconnectConfirm(message, peer);
       case MessageType.disconnect:
         _handleDisconnectMsg(peer);
       case MessageType.reject:
@@ -326,6 +336,9 @@ class PairingService {
 
     onPeerPaired?.call(matchedId, peer.deviceName, peer.platform, peer.ip);
     Log.i(_tag, 'Paired with ${peer.deviceName} ($matchedId)');
+
+    // Persist pairing for reconnection.
+    _savePeerToStorage(matchedId, peer);
   }
 
   Future<void> _handlePairConfirm(Message message, PeerConnection peer) async {
@@ -349,6 +362,9 @@ class PairingService {
 
     onPeerPaired?.call(senderId, senderName, platform, peer.ip);
     Log.i(_tag, 'Pairing confirmed with $senderName ($senderId)');
+
+    // Persist pairing for reconnection.
+    _savePeerToStorage(senderId, peer);
   }
 
   List<int>? _lastSessionKey;
@@ -434,6 +450,205 @@ class PairingService {
       _pendingOutgoing = null;
       _pendingOutgoingNonce = null;
     }
+  }
+
+  // --- Reconnect logic ---
+
+  /// Pending reconnect challenges we sent (keyed by remote deviceId).
+  final Map<String, (PeerConnection, String challenge, List<int> sessionKey)>
+      _pendingReconnects = {};
+
+  /// Try to reconnect to all previously paired peers.
+  Future<void> reconnectToKnownPeers() async {
+    if (secureStorage == null) return;
+    final knownPeers = await secureStorage!.loadAllPairedPeers();
+    if (knownPeers.isEmpty) return;
+
+    Log.i(_tag, 'Attempting reconnect to ${knownPeers.length} known peers');
+    for (final entry in knownPeers.entries) {
+      final info = entry.value.$1;
+      final sessionKey = entry.value.$2;
+      // Don't reconnect to peers already connected.
+      if (_peers.containsKey(info.deviceId)) continue;
+      _attemptReconnect(info, sessionKey);
+    }
+  }
+
+  Future<void> _attemptReconnect(
+      PairedPeerInfo info, List<int> sessionKey) async {
+    Log.i(_tag,
+        'Reconnecting to ${info.deviceName} (${info.lastKnownIp}:${info.lastKnownPort})');
+
+    if (info.lastKnownPort <= 0) {
+      Log.w(_tag, 'No port stored for ${info.deviceName}, skipping');
+      return;
+    }
+
+    final peer = PeerConnection(
+      deviceId: info.deviceId,
+      deviceName: info.deviceName,
+      ip: info.lastKnownIp,
+      port: info.lastKnownPort,
+      platform: info.platform,
+      state: PeerState.connecting,
+    );
+    peer.onMessage = _handleMessage;
+    peer.onDisconnected = _handleDisconnected;
+
+    final connected = await peer.connect();
+    if (!connected) {
+      Log.w(_tag, 'Reconnect failed to ${info.deviceName} — peer offline');
+      return;
+    }
+
+    // Send reconnect request with a challenge nonce.
+    final challenge = _generateNonce();
+    _pendingReconnects[info.deviceId] = (peer, challenge, sessionKey);
+
+    await peer.send(Message.reconnectRequest(
+      senderId: localDeviceId,
+      senderName: localDeviceName,
+      platform: localPlatform,
+      tcpPort: localTcpPort,
+      challenge: challenge,
+    ));
+  }
+
+  Future<void> _handleReconnectRequest(
+      Message message, PeerConnection peer) async {
+    final senderId = message.meta['sender'] as String;
+    final senderName = message.meta['senderName'] as String? ?? 'Unknown';
+    final platform = message.meta['platform'] as String? ?? 'unknown';
+    final challenge = message.meta['challenge'] as String;
+    final tcpPort = message.meta['tcpPort'] as int? ?? 0;
+
+    // Look up session key for this device.
+    if (secureStorage == null) {
+      await peer.send(Message.reject('No secure storage'));
+      return;
+    }
+
+    final knownPeers = await secureStorage!.loadAllPairedPeers();
+    final known = knownPeers[senderId];
+    if (known == null) {
+      Log.w(_tag, 'Reconnect from unknown device: $senderId');
+      await peer.send(Message.reject('Unknown device'));
+      return;
+    }
+
+    final sessionKey = known.$2;
+
+    // Prove we have the key: HMAC(sessionKey, challenge).
+    final response = await _computeHmacBytes(sessionKey, utf8.encode(challenge));
+
+    // Send our own challenge back for mutual auth.
+    final ourChallenge = _generateNonce();
+
+    peer.deviceName = senderName;
+    peer.platform = platform;
+
+    // Store temporarily to verify their response.
+    _pendingReconnects[senderId] = (peer, ourChallenge, sessionKey);
+
+    await peer.send(Message.reconnectConfirm(
+      senderId: localDeviceId,
+      senderName: localDeviceName,
+      platform: localPlatform,
+      tcpPort: localTcpPort,
+      challengeResponse: response,
+      challenge: ourChallenge,
+    ));
+  }
+
+  Future<void> _handleReconnectConfirm(
+      Message message, PeerConnection peer) async {
+    final senderId = message.meta['sender'] as String;
+    final senderName = message.meta['senderName'] as String? ?? 'Unknown';
+    final platform = message.meta['platform'] as String? ?? 'unknown';
+    final challengeResponse = message.meta['challengeResponse'] as String;
+    final theirChallenge = message.meta['challenge'] as String?;
+    final tcpPort = message.meta['tcpPort'] as int? ?? 0;
+
+    // Find our pending reconnect.
+    final pending = _pendingReconnects.remove(senderId);
+    if (pending == null) {
+      // Maybe we're the responder and this is the initiator's final confirm.
+      // Check if senderId matches any pending reconnect by peer reference.
+      String? matchedId;
+      for (final entry in _pendingReconnects.entries) {
+        if (entry.value.$1 == peer) {
+          matchedId = entry.key;
+          break;
+        }
+      }
+      if (matchedId != null) {
+        final p = _pendingReconnects.remove(matchedId)!;
+        await _finalizeReconnect(
+            matchedId, peer, senderName, platform, p.$3, tcpPort);
+        return;
+      }
+
+      Log.w(_tag, 'No pending reconnect for $senderId');
+      return;
+    }
+
+    final (_, ourChallenge, sessionKey) = pending;
+
+    // Verify their response to our challenge.
+    final expected =
+        await _computeHmacBytes(sessionKey, utf8.encode(ourChallenge));
+    if (challengeResponse != expected) {
+      Log.w(_tag, 'Reconnect auth failed from $senderName');
+      await peer.send(Message.reject('Auth failed'));
+      peer.close();
+      return;
+    }
+
+    // If they sent a challenge back, respond to it.
+    if (theirChallenge != null) {
+      final response =
+          await _computeHmacBytes(sessionKey, utf8.encode(theirChallenge));
+      await peer.send(Message.reconnectConfirm(
+        senderId: localDeviceId,
+        senderName: localDeviceName,
+        platform: localPlatform,
+        tcpPort: localTcpPort,
+        challengeResponse: response,
+        challenge: '', // No further challenge needed.
+      ));
+    }
+
+    await _finalizeReconnect(
+        senderId, peer, senderName, platform, sessionKey, tcpPort);
+  }
+
+  Future<void> _finalizeReconnect(String deviceId, PeerConnection peer,
+      String name, String platform, List<int> sessionKey, int port) async {
+    peer.deviceName = name;
+    peer.platform = platform;
+    peer.sessionKey = sessionKey;
+    peer.state = PeerState.paired;
+    _peers[deviceId] = peer;
+
+    // Update stored IP/port.
+    await secureStorage?.updatePeerAddress(deviceId, peer.ip, port);
+
+    onPeerPaired?.call(deviceId, name, platform, peer.ip);
+    Log.i(_tag, 'Reconnected with $name ($deviceId)');
+  }
+
+  void _savePeerToStorage(String deviceId, PeerConnection peer) {
+    if (secureStorage == null || peer.sessionKey == null) return;
+    secureStorage!.savePairedPeer(
+      PairedPeerInfo(
+        deviceId: deviceId,
+        deviceName: peer.deviceName,
+        platform: peer.platform,
+        lastKnownIp: peer.ip,
+        lastKnownPort: peer.port,
+      ),
+      peer.sessionKey!,
+    );
   }
 
   // --- Crypto helpers ---

@@ -67,7 +67,7 @@
 - [x] Tambah Bonjour service declaration di Info.plist (`_copypaste._tcp`) ✅
 - [x] Tambah `NSLocalNetworkUsageDescription` di Info.plist ✅
 - [x] Fix dependency/compatibility issues untuk macOS ✅
-- [ ] Test mDNS discovery (advertise + browse) di macOS
+- [ ] ~~Test mDNS discovery (advertise + browse) di macOS~~ — deferred (manual IP connection cukup untuk v1)
 - [x] Test web server + QR code + mobile browser access ✅
 - [x] Test clipboard sync (desktop ↔ mobile browser) ✅
 - [x] Build release: `flutter build macos` ✅
@@ -91,16 +91,17 @@
 #### Phase 5: Security
 - [x] Desktop ↔ Desktop: PIN-based pairing + HMAC-SHA256 + HKDF session key ✅
 - [x] Desktop ↔ Mobile: PIN-based authentication + session token ✅
-- [ ] Desktop ↔ Desktop: upgrade to X25519 key exchange + AES-256-GCM (optional)
-- [ ] Desktop ↔ Mobile: self-signed TLS (HTTPS + WSS)
-- [x] Session management + token expiry + revocation
+- [x] Session management + token expiry + revocation ✅
+- [ ] ~~Desktop ↔ Desktop: upgrade to X25519 key exchange + AES-256-GCM~~ — deferred (optional, tidak prioritas untuk local network)
+- [ ] ~~Desktop ↔ Mobile: self-signed TLS (HTTPS + WSS)~~ — deferred (menambah UX friction di mobile browser)
 - [ ] Secure key storage (macOS Keychain, Linux libsecret)
 
 **Catatan Phase 5:**
 - Desktop↔Desktop: PIN pairing + HMAC auth sudah berjalan penuh
 - Desktop↔Mobile: PIN auth + session token caching sudah berjalan penuh
-- X25519 + AES-256-GCM adalah optional upgrade untuk encrypted transport
-- Self-signed TLS untuk HTTPS belum diimplementasi (HTTP acceptable untuk local network)
+- Session management: token expiry 24 jam, max 10 sessions, revoke dari desktop UI, auto-cleanup tiap 15 menit
+- X25519 + AES-256-GCM deferred — HMAC auth sudah cukup untuk local network, encryption bisa ditambah di v2
+- Self-signed TLS deferred — menambah UX friction di mobile (terutama iOS Safari) tanpa benefit signifikan di local network
 - Key storage masih in-memory (hilang saat app restart)
 
 #### Phase 6: Polish & UX
@@ -135,12 +136,12 @@
 
 | Phase | Status | Completion |
 |-------|--------|------------|
-| Phase 1: Foundation & Discovery | Mostly done (mDNS Linux pending) | ~85% |
+| Phase 1: Foundation & Discovery | Mostly done (mDNS Linux deferred) | ~85% |
 | Phase 2: Desktop Clipboard Sync | **Complete** | 100% |
 | Phase 3: Web Server + Web Client | **Complete** | 100% |
-| Phase 3.5: macOS Build & Test | Mostly done (mDNS test pending) | ~90% |
+| Phase 3.5: macOS Build & Test | **Complete** (mDNS test deferred) | ~95% |
 | Phase 4: File Transfer | **Complete** | 100% |
-| Phase 5: Security | Core auth done, encryption upgrade pending | ~50% |
+| Phase 5: Security | Auth + session mgmt done, encryption deferred, key storage pending | ~65% |
 | Phase 6: Polish & UX | Theme done, rest pending | ~15% |
 | Phase 7: v1 Release | Packaging & docs done, tests/CI pending | ~60% |
 

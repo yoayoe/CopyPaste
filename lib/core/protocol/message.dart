@@ -152,6 +152,48 @@ class Message {
         payload: chunkData,
       );
 
+  /// Reconnect request: "I have a session key, prove you do too".
+  factory Message.reconnectRequest({
+    required String senderId,
+    required String senderName,
+    required String platform,
+    required int tcpPort,
+    required String challenge,
+  }) =>
+      Message(
+        type: MessageType.reconnectRequest,
+        meta: {
+          'sender': senderId,
+          'senderName': senderName,
+          'platform': platform,
+          'tcpPort': tcpPort,
+          'challenge': challenge,
+        },
+        payload: Uint8List(0),
+      );
+
+  /// Reconnect confirm: mutual auth response.
+  factory Message.reconnectConfirm({
+    required String senderId,
+    required String senderName,
+    required String platform,
+    required int tcpPort,
+    required String challengeResponse,
+    required String challenge,
+  }) =>
+      Message(
+        type: MessageType.reconnectConfirm,
+        meta: {
+          'sender': senderId,
+          'senderName': senderName,
+          'platform': platform,
+          'tcpPort': tcpPort,
+          'challengeResponse': challengeResponse,
+          'challenge': challenge,
+        },
+        payload: Uint8List(0),
+      );
+
   /// Disconnect notification.
   factory Message.disconnect(String senderId) => Message(
         type: MessageType.disconnect,

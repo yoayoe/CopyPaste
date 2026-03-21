@@ -7,9 +7,11 @@ import '../core/network/tcp_server.dart';
 import '../core/web_server/http_server.dart';
 import '../models/session_info.dart';
 import '../models/transfer_task.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/clipboard_service.dart';
 import '../services/file_transfer_service.dart';
 import '../services/pairing_service.dart';
+import '../services/secure_storage_service.dart';
 import '../utils/constants.dart';
 import '../utils/logger.dart';
 import '../utils/network_utils.dart';
@@ -18,9 +20,10 @@ const _tag = 'AppService';
 
 /// Central service that orchestrates all components.
 class AppService {
-  final String _deviceId = const Uuid().v4();
+  late final String _deviceId;
   late final String _deviceName;
   late final String _webClientPath;
+  late final SecureStorageService secureStorage;
 
   DiscoveryService? discovery;
   late final TcpServer tcpServer;
@@ -82,6 +85,14 @@ class AppService {
     _deviceName = Platform.localHostname;
     localIp = await getLocalIpAddress();
 
+    // Persist device ID across restarts.
+    final prefs = await SharedPreferences.getInstance();
+    _deviceId = prefs.getString('device_id') ?? const Uuid().v4();
+    await prefs.setString('device_id', _deviceId);
+
+    // Initialize secure storage.
+    secureStorage = SecureStorageService();
+
     Log.i(_tag, 'Device: $_deviceName ($_deviceId)');
     Log.i(_tag, 'Local IP: $localIp');
 
@@ -99,6 +110,7 @@ class AppService {
       localPlatform: Platform.operatingSystem,
       localTcpPort: tcpPort,
       localWebPort: 0, // Will update after web server starts.
+      secureStorage: secureStorage,
     );
     _wirePairingCallbacks();
 
@@ -196,6 +208,9 @@ class AppService {
 
     Log.i(_tag, 'Started — TCP: $tcpPort, Web: $webPort');
     Log.i(_tag, 'Mobile URL: $webUrl');
+
+    // 7. Reconnect to previously paired peers.
+    pairingService.reconnectToKnownPeers();
   }
 
   void _wirePairingCallbacks() {

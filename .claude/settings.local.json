@@ -9,7 +9,9 @@
       "Bash(/snap/bin/flutter create:*)",
       "Bash(/home/yoayoe/flutter/bin/flutter analyze:*)",
       "Bash(/home/yoayoe/flutter/bin/flutter build:*)",
-      "Bash(/home/yoayoe/flutter/bin/flutter run:*)"
+      "Bash(/home/yoayoe/flutter/bin/flutter run:*)",
+      "Bash(/home/yoayoe/flutter/bin/flutter pub:*)",
+      "Bash(sudo apt-get:*)"
     ]
   }
 }
