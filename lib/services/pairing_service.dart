@@ -209,7 +209,7 @@ class PairingService {
   // --- Message handlers ---
 
   void _handleMessage(Message message, PeerConnection peer) {
-    Log.d(_tag, 'Message: ${message.type.name} from ${peer.ip}');
+    Log.i(_tag, '<<< Message: ${message.type.name} from ${peer.ip} (${peer.deviceName})');
 
     switch (message.type) {
       case MessageType.pairRequest:
@@ -441,6 +441,7 @@ class PairingService {
   }
 
   void _handleDisconnected(PeerConnection peer) {
+    Log.i(_tag, 'Disconnected: ${peer.deviceName} (${peer.ip}:${peer.port}) state=${peer.state.name}');
     final deviceId =
         _peers.entries.where((e) => e.value == peer).map((e) => e.key).firstOrNull;
     if (deviceId != null) {
@@ -448,7 +449,16 @@ class PairingService {
       onPeerDisconnected?.call(deviceId);
     }
 
-    // Clean up pending.
+    // Clean up pending reconnects.
+    _pendingReconnects.removeWhere((key, value) {
+      if (value.$1 == peer) {
+        Log.i(_tag, 'Cleaned up pending reconnect for $key due to disconnect');
+        return true;
+      }
+      return false;
+    });
+
+    // Clean up pending pairing.
     _pendingIncoming.removeWhere((_, v) => v.peer == peer);
     if (_pendingOutgoing == peer) {
       _pendingOutgoing = null;
@@ -498,34 +508,41 @@ class PairingService {
       return;
     }
 
-    final peer = PeerConnection(
-      deviceId: info.deviceId,
-      deviceName: info.deviceName,
-      ip: info.lastKnownIp,
-      port: info.lastKnownPort,
-      platform: info.platform,
-      state: PeerState.connecting,
-    );
-    peer.onMessage = _handleMessage;
-    peer.onDisconnected = _handleDisconnected;
+    try {
+      final peer = PeerConnection(
+        deviceId: info.deviceId,
+        deviceName: info.deviceName,
+        ip: info.lastKnownIp,
+        port: info.lastKnownPort,
+        platform: info.platform,
+        state: PeerState.connecting,
+      );
+      peer.onMessage = _handleMessage;
+      peer.onDisconnected = _handleDisconnected;
 
-    final connected = await peer.connect();
-    if (!connected) {
-      Log.w(_tag, 'Reconnect failed to ${info.deviceName} — peer offline');
-      return;
+      Log.i(_tag, 'Attempting TCP connect to ${info.lastKnownIp}:${info.lastKnownPort}...');
+      final connected = await peer.connect();
+      if (!connected) {
+        Log.w(_tag, 'Reconnect TCP failed to ${info.deviceName} — peer offline or port changed');
+        return;
+      }
+      Log.i(_tag, 'TCP connected to ${info.deviceName}, sending reconnect request...');
+
+      // Send reconnect request with a challenge nonce.
+      final challenge = _generateNonce();
+      _pendingReconnects[info.deviceId] = (peer, challenge, sessionKey);
+
+      final sent = await peer.send(Message.reconnectRequest(
+        senderId: localDeviceId,
+        senderName: localDeviceName,
+        platform: localPlatform,
+        tcpPort: localTcpPort,
+        challenge: challenge,
+      ));
+      Log.i(_tag, 'Reconnect request sent to ${info.deviceName}: $sent');
+    } catch (e) {
+      Log.e(_tag, 'Reconnect attempt error for ${info.deviceName}', e);
     }
-
-    // Send reconnect request with a challenge nonce.
-    final challenge = _generateNonce();
-    _pendingReconnects[info.deviceId] = (peer, challenge, sessionKey);
-
-    await peer.send(Message.reconnectRequest(
-      senderId: localDeviceId,
-      senderName: localDeviceName,
-      platform: localPlatform,
-      tcpPort: localTcpPort,
-      challenge: challenge,
-    ));
   }
 
   Future<void> _handleReconnectRequest(
@@ -536,19 +553,44 @@ class PairingService {
     final challenge = message.meta['challenge'] as String;
     final tcpPort = message.meta['tcpPort'] as int? ?? 0;
 
+    Log.i(_tag, '>>> Received reconnect REQUEST from $senderName ($senderId) tcpPort=$tcpPort');
+
+    // Handle simultaneous reconnect: both sides try at the same time.
+    // If we already have a pending outgoing reconnect to this device,
+    // use device ID comparison as tiebreaker: higher ID becomes responder.
+    final existingPending = _pendingReconnects[senderId];
+    if (existingPending != null) {
+      if (localDeviceId.compareTo(senderId) > 0) {
+        // We have the higher ID — we become the responder.
+        // Cancel our outgoing attempt and respond to theirs.
+        Log.i(_tag, 'Simultaneous reconnect detected, we yield (higher ID = responder)');
+        final oldPeer = existingPending.$1;
+        oldPeer.close();
+        _pendingReconnects.remove(senderId);
+      } else {
+        // We have the lower ID — we stay as initiator.
+        // Ignore their request; they should respond to ours.
+        Log.i(_tag, 'Simultaneous reconnect detected, we keep initiator role (lower ID)');
+        return;
+      }
+    }
+
     // Look up session key for this device.
     if (secureStorage == null) {
+      Log.w(_tag, 'No secure storage on this device — rejecting reconnect');
       await peer.send(Message.reject('No secure storage'));
       return;
     }
 
     final knownPeers = await secureStorage!.loadAllPairedPeers();
+    Log.i(_tag, 'Known peers in storage: ${knownPeers.keys.toList()}');
     final known = knownPeers[senderId];
     if (known == null) {
-      Log.w(_tag, 'Reconnect from unknown device: $senderId');
+      Log.w(_tag, 'Reconnect from unknown device: $senderId (not in our storage)');
       await peer.send(Message.reject('Unknown device'));
       return;
     }
+    Log.i(_tag, 'Found stored session key for $senderId, proceeding with auth');
 
     final sessionKey = known.$2;
 
@@ -584,9 +626,13 @@ class PairingService {
     final theirChallenge = message.meta['challenge'] as String?;
     final tcpPort = message.meta['tcpPort'] as int? ?? 0;
 
+    Log.i(_tag, '>>> Received reconnect CONFIRM from $senderName ($senderId) tcpPort=$tcpPort');
+    Log.i(_tag, 'Pending reconnects: ${_pendingReconnects.keys.toList()}');
+
     // Find our pending reconnect.
     final pending = _pendingReconnects.remove(senderId);
     if (pending == null) {
+      Log.i(_tag, 'No pending reconnect by senderId=$senderId, checking by peer reference...');
       // Maybe we're the responder and this is the initiator's final confirm.
       // Check if senderId matches any pending reconnect by peer reference.
       String? matchedId;
@@ -597,13 +643,14 @@ class PairingService {
         }
       }
       if (matchedId != null) {
+        Log.i(_tag, 'Found pending reconnect by peer reference: $matchedId');
         final p = _pendingReconnects.remove(matchedId)!;
         await _finalizeReconnect(
             matchedId, peer, senderName, platform, p.$3, tcpPort);
         return;
       }
 
-      Log.w(_tag, 'No pending reconnect for $senderId');
+      Log.w(_tag, 'No pending reconnect for $senderId (neither by ID nor peer ref)');
       return;
     }
 
