@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../core/discovery/discovery_service.dart';
 import '../core/network/tcp_server.dart';
+import '../core/tls/certificate_manager.dart';
 import '../core/web_server/http_server.dart';
 import '../models/session_info.dart';
 import '../models/transfer_task.dart';
@@ -33,9 +34,15 @@ class AppService {
   late final PairingService pairingService;
   late final FileTransferService fileTransfer;
 
+  CertificateManager? _certManager;
+
   String get deviceId => _deviceId;
   String get deviceName => _deviceName;
-  String get webUrl => 'http://$localIp:${webServer.port}';
+  String get webUrl {
+    final scheme = webServer.isTls ? 'https' : 'http';
+    return '$scheme://$localIp:${webServer.port}';
+  }
+  bool get isTlsEnabled => webServer.isTls;
   int get tcpPort => tcpServer.port;
   String localIp = '127.0.0.1';
 
@@ -123,10 +130,31 @@ class AppService {
     );
     _wirePairingCallbacks();
 
-    // 3. Start web server (desktop ↔ mobile).
+    // 3. Start web server (desktop ↔ mobile) with optional TLS.
     webServer = EmbeddedWebServer(webClientPath: _webClientPath);
-    final webPort =
-        await webServer.start(port: await findAvailablePort(kWebPortMin, kWebPortMax));
+    SecurityContext? securityContext;
+
+    final tlsEnabled = prefs.getBool('tls_enabled') ?? true;
+    if (tlsEnabled) {
+      final appSupportForTls = await getApplicationSupportDirectory();
+      _certManager = CertificateManager(
+        storageDir: '${appSupportForTls.path}/tls',
+      );
+      final certReady = await _certManager!.ensureCertificate(localIp: localIp);
+      if (certReady) {
+        securityContext = _certManager!.createSecurityContext();
+      }
+      if (securityContext == null) {
+        Log.w(_tag, 'TLS requested but unavailable — falling back to HTTP');
+      }
+    } else {
+      Log.i(_tag, 'TLS disabled by user preference');
+    }
+
+    final webPort = await webServer.start(
+      port: await findAvailablePort(kWebPortMin, kWebPortMax),
+      securityContext: securityContext,
+    );
 
     // Wire WebSocket messages from mobile clients.
     webServer.onMessage.listen(_handleWebSocketMessage);
@@ -139,6 +167,32 @@ class AppService {
       onWebClientAuthenticated?.call(clientIp, clientName);
     };
 
+    // Provide initial state for polling clients (Safari iOS fallback).
+    webServer.onPollInitRequested = () {
+      final devices = <Map<String, dynamic>>[
+        {
+          'id': _deviceId,
+          'name': _deviceName,
+          'platform': Platform.operatingSystem,
+          'ip': localIp,
+        },
+      ];
+      for (final peer in pairingService.peers) {
+        devices.add({
+          'id': peer.deviceId,
+          'name': peer.deviceName,
+          'platform': peer.platform,
+          'ip': peer.ip,
+        });
+      }
+      return {
+        'devices': devices,
+        'webClients': webServer.clients.length,
+        'clipboardHistory': _clipboardHistory,
+        'transferHistory': _transferHistory,
+      };
+    };
+
     // When a mobile client connects/disconnects/identifies, update everything.
     webServer.onClientChanged = (clients) {
       _broadcastDeviceList();
@@ -147,10 +201,16 @@ class AppService {
           .toList();
       onWebClientsChanged?.call(clientList);
       // Send clipboard and transfer history to connected clients.
+      // Stagger the history broadcasts to avoid overwhelming the WebSocket
+      // on initial connect (Safari WSS drops connection on message burst).
       if (clients.isNotEmpty) {
-        webServer.broadcast('clipboard:history', {'items': _clipboardHistory});
+        Future.delayed(const Duration(milliseconds: 100), () {
+          webServer.broadcast('clipboard:history', {'items': _clipboardHistory});
+        });
         if (_transferHistory.isNotEmpty) {
-          webServer.broadcast('transfer:history', {'items': _transferHistory});
+          Future.delayed(const Duration(milliseconds: 200), () {
+            webServer.broadcast('transfer:history', {'items': _transferHistory});
+          });
         }
       }
     };
@@ -300,6 +360,21 @@ class AppService {
     await pairingService.disconnectPeer(deviceId);
   }
 
+  /// Toggle TLS on/off. Requires restart to take effect.
+  /// Returns the new TLS preference value.
+  Future<bool> setTlsEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tls_enabled', enabled);
+    Log.i(_tag, 'TLS preference set to $enabled (restart required)');
+    return enabled;
+  }
+
+  /// Get current TLS preference (what will be used on next restart).
+  Future<bool> getTlsPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('tls_enabled') ?? true;
+  }
+
   /// Active web client sessions.
   List<SessionInfo> get webClientSessions => webServer.activeSessions;
 
@@ -331,7 +406,9 @@ class AppService {
   }
 
   /// Make a file available for mobile download and notify web clients.
-  void shareFileToMobile(String filePath, String filename, int size) {
+  /// If [addToDesktopList] is true, also show in desktop Files tab.
+  void shareFileToMobile(String filePath, String filename, int size,
+      {bool addToDesktopList = true}) {
     final fileId = webServer.addFileForDownload(filePath, filename, '');
     _broadcastTransferComplete({
       'id': fileId,
@@ -340,6 +417,23 @@ class AppService {
       'size': size,
       'status': 'completed',
     });
+
+    if (addToDesktopList) {
+      final task = TransferTask(
+        id: fileId,
+        filename: filename,
+        mimeType: 'application/octet-stream',
+        totalBytes: size,
+        transferredBytes: size,
+        status: TransferStatus.completed,
+        direction: TransferDirection.send,
+        deviceId: 'mobile',
+        deviceName: 'Mobile Browser',
+        startedAt: DateTime.now(),
+        filePath: filePath,
+      );
+      _transferStream.add(task);
+    }
   }
 
   void _wireFileTransferCallbacks() {

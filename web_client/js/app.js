@@ -9,27 +9,23 @@ const App = (() => {
   function init() {
     UI.initTabs();
 
-    // Connect WebSocket.
-    WS.connect();
-
-    // Connection events.
+    // Connection events — register BEFORE connect so polling emit is caught.
     WS.on('_connected', () => {
       // Don't set connected status yet — wait for auth.
-      // Send device info to server (allowed before auth).
-      WS.send('device:info', {
-        name: getDeviceName(),
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-      });
+      // Send device info to server (only relevant for WebSocket connections).
+      if (!WS.isPolling()) {
+        WS.send('device:info', {
+          name: getDeviceName(),
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+        });
+      }
     });
-    WS.on('_disconnected', () => UI.setConnectionStatus(false));
-    WS.on('_error', (url) => {
-      UI.toast('Connection failed');
-      // Show debug info.
-      const bar = document.getElementById('debug-bar');
-      if (bar) {
-        bar.style.display = 'block';
-        bar.textContent = 'WS: ' + url + ' | UA: ' + navigator.userAgent.substring(0, 60) + '...';
+    WS.on('_disconnected', () => {
+      // Only show disconnected if we're not about to switch to polling.
+      // Don't clear clipboard/transfer data — keep it visible during reconnect.
+      if (!WS.isPolling()) {
+        UI.setConnectionStatus(false);
       }
     });
 
@@ -49,8 +45,14 @@ const App = (() => {
     });
 
     WS.on('clipboard:history', (data) => {
-      clipboardHistory = data.items || [];
-      UI.renderClipboardHistory(clipboardHistory);
+      const items = data.items || [];
+      if (items.length > 0) {
+        // Merge: use server history but keep any local items not yet synced.
+        const ids = new Set(items.map(i => i.id));
+        const localOnly = clipboardHistory.filter(i => !ids.has(i.id));
+        clipboardHistory = [...localOnly, ...items].slice(0, 50);
+        UI.renderClipboardHistory(clipboardHistory);
+      }
     });
 
     // Restore transfer history on reconnect/refresh.
@@ -146,6 +148,10 @@ const App = (() => {
     document.getElementById('pin-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') verifyPin();
     });
+
+    // Connect AFTER all listeners are registered (important for polling mode
+    // which emits events synchronously during connect).
+    WS.connect();
   }
 
   function verifyPin() {
@@ -292,8 +298,8 @@ const App = (() => {
     return 'Mobile Browser';
   }
 
-  // Expose for onclick handlers in HTML.
-  return { init, copyItem, downloadFile };
+  // Expose for onclick handlers in HTML and polling auth.
+  return { init, copyItem, downloadFile, getDeviceName };
 })();
 
 document.addEventListener('DOMContentLoaded', App.init);

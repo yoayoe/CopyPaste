@@ -48,6 +48,14 @@ class EmbeddedWebServer {
   /// Received files stored temporarily for download. fileId → (path, filename, checksum).
   final Map<String, ({String path, String filename, String checksum})> _receivedFiles = {};
 
+  /// Message queues for HTTP polling clients (keyed by session token).
+  /// Safari iOS drops WSS on self-signed certs after refresh, so polling is the fallback.
+  final Map<String, List<String>> _pollQueues = {};
+  static const int _maxPollQueueSize = 100;
+
+  /// Pending poll auth flows: authToken → {pin, nonce, clientIp, clientName, createdAt}.
+  final Map<String, Map<String, dynamic>> _pendingPollAuth = {};
+
   /// Directory for received file storage.
   String? _downloadDir;
 
@@ -61,6 +69,10 @@ class EmbeddedWebServer {
 
   /// Called when a web client connects or disconnects.
   void Function(List<WebClientInfo> clients)? onClientChanged;
+
+  /// Called when a polling client requests initial state (devices, clipboard, transfers).
+  /// Returns a map with the initial data to send.
+  Map<String, dynamic> Function()? onPollInitRequested;
 
   /// Called when a new web client needs PIN verification.
   /// The desktop should display this PIN to the user.
@@ -82,16 +94,38 @@ class EmbeddedWebServer {
   int get port => _server?.port ?? 0;
   bool get isRunning => _server != null;
 
+  /// Whether the server is running with TLS (HTTPS/WSS).
+  bool get isTls => _isTls;
+  bool _isTls = false;
+
   /// Non-expired active sessions.
   List<SessionInfo> get activeSessions =>
       _sessions.values.where((s) => !s.isExpired(sessionMaxAge)).toList();
 
   EmbeddedWebServer({required this.webClientPath});
 
-  /// Start the HTTP + WebSocket server.
-  Future<int> start({int port = 0}) async {
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    Log.i(_tag, 'Listening on port ${_server!.port}');
+  /// Start the HTTP(S) + WebSocket server.
+  ///
+  /// If [securityContext] is provided, the server runs over TLS (HTTPS + WSS).
+  /// Otherwise, it falls back to plain HTTP + WS.
+  Future<int> start({int port = 0, SecurityContext? securityContext}) async {
+    if (securityContext != null) {
+      try {
+        _server = await HttpServer.bindSecure(
+          InternetAddress.anyIPv4, port, securityContext);
+        _isTls = true;
+        Log.i(_tag, 'Listening on port ${_server!.port} (HTTPS/WSS)');
+      } catch (e) {
+        Log.w(_tag, 'TLS bind failed, falling back to HTTP: $e');
+        _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+        _isTls = false;
+        Log.i(_tag, 'Listening on port ${_server!.port} (HTTP/WS — TLS fallback)');
+      }
+    } else {
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+      _isTls = false;
+      Log.i(_tag, 'Listening on port ${_server!.port} (HTTP/WS)');
+    }
 
     _server!.listen(_handleRequest);
 
@@ -161,22 +195,13 @@ class EmbeddedWebServer {
         '(${hasValidToken ? "has token" : "new"}, ${_connectedClients.length} clients)');
 
     if (hasValidToken) {
-      // Already authenticated via session token — update last seen.
       session.lastSeenAt = DateTime.now();
       clientInfo.sessionToken = token;
-      _sendToClient(clientInfo, 'auth:success', {'message': 'Session restored'});
-      onClientChanged?.call(_connectedClients);
-    } else {
-      // New client — require PIN.
-      final pin = _generatePin();
-      final nonce = _generateNonce();
-      clientInfo._pin = pin;
-      clientInfo._nonce = nonce;
-
-      _sendToClient(clientInfo, 'auth:challenge', {'nonce': nonce});
-      onPinGenerated?.call(clientIp, clientInfo.name, pin);
     }
 
+    // Set up the socket listener FIRST, before sending any messages.
+    // This ensures errors during initial message burst are properly caught
+    // (Safari drops WSS connections if messages are sent before listener is ready).
     socket.listen(
       (data) {
         try {
@@ -229,6 +254,24 @@ class EmbeddedWebServer {
         onClientChanged?.call(_connectedClients);
       },
     );
+
+    // Now send initial messages AFTER listener is set up.
+    // Use Future.microtask to let the event loop settle before sending,
+    // which helps Safari's WSS handle the initial message burst.
+    Future.microtask(() {
+      if (hasValidToken) {
+        _sendToClient(clientInfo, 'auth:success', {'message': 'Session restored'});
+        onClientChanged?.call(_connectedClients);
+      } else {
+        final pin = _generatePin();
+        final nonce = _generateNonce();
+        clientInfo._pin = pin;
+        clientInfo._nonce = nonce;
+
+        _sendToClient(clientInfo, 'auth:challenge', {'nonce': nonce});
+        onPinGenerated?.call(clientIp, clientInfo.name, pin);
+      }
+    });
   }
 
   Future<void> _handleAuthVerify(WebClientInfo client, Map<String, dynamic>? data) async {
@@ -367,6 +410,33 @@ class EmbeddedWebServer {
       return;
     }
 
+    // --- Polling fallback endpoints (for Safari iOS WSS issues) ---
+
+    if (path == '/api/init' && request.method == 'GET') {
+      await _handlePollInit(request);
+      return;
+    }
+
+    if (path == '/api/poll' && request.method == 'GET') {
+      await _handlePoll(request);
+      return;
+    }
+
+    if (path == '/api/send' && request.method == 'POST') {
+      await _handlePollSend(request);
+      return;
+    }
+
+    if (path == '/api/auth/start' && request.method == 'POST') {
+      await _handlePollAuthStart(request);
+      return;
+    }
+
+    if (path == '/api/auth/verify' && request.method == 'POST') {
+      await _handlePollAuthVerify(request);
+      return;
+    }
+
     request.response.statusCode = 404;
     request.response.write('Not Found');
     await request.response.close();
@@ -467,6 +537,201 @@ class EmbeddedWebServer {
     await file.openRead().pipe(request.response);
   }
 
+  // --- Polling fallback handlers (Safari iOS WSS workaround) ---
+
+  /// GET /api/init?token=X — Return initial state for polling clients.
+  Future<void> _handlePollInit(HttpRequest request) async {
+    final session = _validatePollToken(request);
+    if (session == null) {
+      request.response.statusCode = 401;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': 'unauthorized'}));
+      await request.response.close();
+      return;
+    }
+
+    Log.i(_tag, 'Poll init from ${session.clientName} (${session.clientIp})');
+
+    // Get initial data from the app service via callback.
+    final initData = onPollInitRequested?.call() ?? {};
+
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(jsonEncode(initData));
+    await request.response.close();
+
+    // Also notify that a client "connected" via polling.
+    onClientAuthenticated?.call(session.clientIp, session.clientName);
+  }
+
+  /// Validate session token from query param. Returns session or null.
+  SessionInfo? _validatePollToken(HttpRequest request) {
+    final token = request.uri.queryParameters['token'];
+    if (token == null || token.isEmpty) return null;
+    final session = _sessions[token];
+    if (session == null || session.isExpired(sessionMaxAge)) return null;
+    session.lastSeenAt = DateTime.now();
+    return session;
+  }
+
+  /// GET /api/poll?token=X — Return and flush queued messages.
+  Future<void> _handlePoll(HttpRequest request) async {
+    final session = _validatePollToken(request);
+    if (session == null) {
+      request.response.statusCode = 401;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': 'unauthorized'}));
+      await request.response.close();
+      return;
+    }
+
+    final queue = _pollQueues.remove(session.token) ?? [];
+    request.response.headers.contentType = ContentType.json;
+    // Return raw JSON messages (already encoded).
+    request.response.write('[${queue.join(',')}]');
+    await request.response.close();
+  }
+
+  /// POST /api/send?token=X — Accept a client message (same as WS event).
+  Future<void> _handlePollSend(HttpRequest request) async {
+    final session = _validatePollToken(request);
+    if (session == null) {
+      request.response.statusCode = 401;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': 'unauthorized'}));
+      await request.response.close();
+      return;
+    }
+
+    try {
+      final body = await utf8.decodeStream(request);
+      final msg = jsonDecode(body) as Map<String, dynamic>;
+      _incomingMessages.add(msg);
+
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'status': 'ok'}));
+      await request.response.close();
+    } catch (e) {
+      request.response.statusCode = 400;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': 'invalid message'}));
+      await request.response.close();
+    }
+  }
+
+  /// POST /api/auth/start — Begin polling auth flow. Returns authToken + nonce.
+  Future<void> _handlePollAuthStart(HttpRequest request) async {
+    final clientIp = request.connectionInfo?.remoteAddress.address ?? 'unknown';
+
+    String clientName = 'Mobile Browser';
+    try {
+      final body = await utf8.decodeStream(request);
+      if (body.isNotEmpty) {
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        clientName = (data['name'] as String?) ?? clientName;
+      }
+    } catch (_) {}
+
+    final authToken = _generateSessionToken().substring(0, 24);
+    final pin = _generatePin();
+    final nonce = _generateNonce();
+
+    _pendingPollAuth[authToken] = {
+      'pin': pin,
+      'nonce': nonce,
+      'clientIp': clientIp,
+      'clientName': clientName,
+      'createdAt': DateTime.now(),
+    };
+
+    // Clean up old pending auths (> 5 min).
+    _pendingPollAuth.removeWhere((_, v) {
+      final created = v['createdAt'] as DateTime;
+      return DateTime.now().difference(created).inMinutes > 5;
+    });
+
+    Log.i(_tag, 'Poll auth started for $clientName ($clientIp)');
+    onPinGenerated?.call(clientIp, clientName, pin);
+
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(jsonEncode({
+      'authToken': authToken,
+      'nonce': nonce,
+    }));
+    await request.response.close();
+  }
+
+  /// POST /api/auth/verify — Verify PIN for polling auth flow.
+  Future<void> _handlePollAuthVerify(HttpRequest request) async {
+    try {
+      final body = await utf8.decodeStream(request);
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final authToken = data['authToken'] as String?;
+      final receivedPin = data['pin'] as String?;
+      final receivedHmac = data['hmac'] as String?;
+
+      if (authToken == null || _pendingPollAuth[authToken] == null) {
+        request.response.statusCode = 400;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'error': 'invalid auth token'}));
+        await request.response.close();
+        return;
+      }
+
+      final pending = _pendingPollAuth[authToken]!;
+      final pin = pending['pin'] as String;
+      final nonce = pending['nonce'] as String;
+      final clientIp = pending['clientIp'] as String;
+      final clientName = pending['clientName'] as String;
+
+      bool verified = false;
+      if (receivedPin != null && receivedPin == pin) {
+        verified = true;
+      } else if (receivedHmac != null) {
+        final expectedHmac = await _computeHmac(pin, nonce);
+        verified = receivedHmac == expectedHmac;
+      }
+
+      if (!verified) {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'error': 'invalid PIN'}));
+        await request.response.close();
+        return;
+      }
+
+      // Authenticated — create session.
+      _pendingPollAuth.remove(authToken);
+
+      if (_sessions.length >= maxSessions) {
+        final oldest = _sessions.entries
+            .reduce((a, b) => a.value.lastSeenAt.isBefore(b.value.lastSeenAt) ? a : b);
+        _revokeSession(oldest.key, reason: 'max_sessions');
+      }
+
+      final sessionToken = _generateSessionToken();
+      _sessions[sessionToken] = SessionInfo(
+        token: sessionToken,
+        clientName: clientName,
+        clientIp: clientIp,
+        createdAt: DateTime.now(),
+      );
+
+      Log.i(_tag, 'Poll client authenticated: $clientName ($clientIp)');
+      onClientAuthenticated?.call(clientIp, clientName);
+      onClientChanged?.call(_connectedClients);
+
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'sessionToken': sessionToken,
+      }));
+      await request.response.close();
+    } catch (e) {
+      request.response.statusCode = 400;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': 'invalid request'}));
+      await request.response.close();
+    }
+  }
+
   /// Make a file available for download by mobile clients.
   String addFileForDownload(String filePath, String filename, String checksum) {
     final fileId = _generateSessionToken().substring(0, 16);
@@ -508,17 +773,34 @@ class EmbeddedWebServer {
     }
   }
 
-  /// Broadcast a message to all authenticated WebSocket clients.
+  /// Broadcast a message to all authenticated clients (WebSocket + poll queues).
   void broadcast(String event, Map<String, dynamic> data) {
     final msg = jsonEncode({'event': event, 'data': data});
+
+    // Send to WebSocket clients.
+    final wsTokens = <String>{};
     for (final client in _connectedClients.toList()) {
       if (!client.authenticated) continue;
       try {
         client.socket.add(msg);
+        if (client.sessionToken != null) wsTokens.add(client.sessionToken!);
       } catch (e) {
         _connectedClients.remove(client);
       }
     }
+
+    // Queue for polling clients (sessions without active WS connection).
+    for (final token in _sessions.keys) {
+      if (wsTokens.contains(token)) continue; // Already sent via WS.
+      _enqueueForPoll(token, msg);
+    }
+  }
+
+  /// Queue a message for a polling client.
+  void _enqueueForPoll(String token, String msg) {
+    final queue = _pollQueues.putIfAbsent(token, () => []);
+    queue.add(msg);
+    if (queue.length > _maxPollQueueSize) queue.removeAt(0);
   }
 
   ContentType _contentType(String ext) => switch (ext) {

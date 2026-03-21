@@ -1,68 +1,42 @@
 /**
  * Authentication module.
- * Handles PIN-based auth with the desktop server.
- *
- * Note: Web Crypto API (crypto.subtle) is unavailable on non-HTTPS origins,
- * so we use a simple hash approach that works everywhere.
+ * Handles PIN-based auth via WebSocket or HTTP polling fallback.
  */
 const Auth = (() => {
   let _nonce = null;
   let _authenticated = false;
+  let _isPollingAuth = false;
 
   /**
-   * Simple hash: SHA-256 via crypto.subtle if available, otherwise basic hash.
+   * Compute HMAC-SHA256(nonce, pin) matching the server's verification.
+   * Uses Web Crypto API on secure contexts (HTTPS/localhost).
    */
-  async function hashPinNonce(pin, nonce) {
-    const input = pin + ':' + nonce;
-
-    // Try Web Crypto API first (works on HTTPS/localhost).
+  async function computeHmac(pin, nonce) {
     if (window.crypto && window.crypto.subtle) {
       try {
         const encoder = new TextEncoder();
-        const data = encoder.encode(input);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
+        const key = await crypto.subtle.importKey(
+          'raw', encoder.encode(pin), { name: 'HMAC', hash: 'SHA-256' },
+          false, ['sign']
+        );
+        const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(nonce));
+        return btoa(String.fromCharCode(...new Uint8Array(sig)));
       } catch (e) {
-        console.warn('[Auth] crypto.subtle failed, using fallback:', e);
+        console.warn('[Auth] crypto.subtle HMAC failed:', e);
       }
     }
-
-    // Fallback: simple string hash (works on HTTP).
-    return simpleHash(input);
+    return null;
   }
 
   /**
-   * Simple deterministic hash for non-secure contexts.
-   */
-  function simpleHash(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash + char) | 0;
-    }
-    // Combine with a more thorough mixing.
-    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-    for (let i = 0; i < str.length; i++) {
-      const ch = str.charCodeAt(i);
-      h1 = Math.imul(h1 ^ ch, 2654435761);
-      h2 = Math.imul(h2 ^ ch, 1597334677);
-    }
-    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
-    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
-    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-    const combined = 4294967296 * (2097151 & h2) + (h1 >>> 0);
-    return btoa(combined.toString(36) + ':' + hash.toString(36));
-  }
-
-  /**
-   * Handle auth:challenge from server.
+   * Handle auth:challenge from server (WebSocket or polling).
    */
   function handleChallenge(data) {
     _nonce = data.nonce;
     _authenticated = false;
+    _isPollingAuth = !!data.polling;
     UI.showPinOverlay();
-    console.log('[Auth] Challenge received, showing PIN input');
+    console.log('[Auth] Challenge received' + (_isPollingAuth ? ' (polling mode)' : ''));
   }
 
   /**
@@ -75,8 +49,65 @@ const Auth = (() => {
     }
 
     console.log('[Auth] Submitting PIN verification...');
-    const hash = await hashPinNonce(pin, _nonce);
-    WS.send('auth:verify', { pin: pin, hash: hash });
+
+    if (_isPollingAuth) {
+      // Polling mode — verify via HTTP POST.
+      await submitPinViaPoll(pin);
+    } else {
+      // WebSocket mode.
+      const hmac = await computeHmac(pin, _nonce);
+      if (hmac) {
+        WS.send('auth:verify', { hmac: hmac });
+      } else {
+        WS.send('auth:verify', { pin: pin });
+      }
+    }
+  }
+
+  /**
+   * Submit PIN via HTTP polling auth endpoint.
+   */
+  async function submitPinViaPoll(pin) {
+    const authToken = localStorage.getItem('cp_poll_auth_token');
+    if (!authToken) {
+      UI.setPinError('Auth session expired — please refresh');
+      return;
+    }
+
+    try {
+      const hmac = await computeHmac(pin, _nonce);
+      const body = { authToken };
+      if (hmac) {
+        body.hmac = hmac;
+      } else {
+        body.pin = pin;
+      }
+
+      const resp = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await resp.json();
+
+      if (data.error) {
+        UI.setPinError(data.error);
+        return;
+      }
+
+      if (data.sessionToken) {
+        localStorage.setItem('cp_session_token', data.sessionToken);
+        localStorage.removeItem('cp_poll_auth_token');
+        localStorage.removeItem('cp_poll_nonce');
+        handleSuccess({ sessionToken: data.sessionToken, message: 'Authenticated (polling)' });
+        // Start poll loop + fetch initial data now that we have a token.
+        WS.onPollAuthenticated();
+      }
+    } catch (e) {
+      console.error('[Auth] Poll verify failed:', e);
+      UI.setPinError('Verification failed — try again');
+    }
   }
 
   /**
@@ -85,8 +116,8 @@ const Auth = (() => {
   function handleSuccess(data) {
     _authenticated = true;
     _nonce = null;
+    _isPollingAuth = false;
 
-    // Save session token for reconnect/refresh.
     if (data && data.sessionToken) {
       localStorage.setItem('cp_session_token', data.sessionToken);
       console.log('[Auth] Session token saved');
@@ -94,8 +125,8 @@ const Auth = (() => {
 
     UI.hidePinOverlay();
     UI.setConnectionStatus(true);
-    UI.toast('Authenticated!');
-    console.log('[Auth] Authenticated successfully');
+    UI.toast(WS.isPolling() ? 'Connected (polling)' : 'Authenticated!');
+    console.log('[Auth] Authenticated successfully' + (WS.isPolling() ? ' (polling)' : ''));
   }
 
   /**
@@ -107,7 +138,7 @@ const Auth = (() => {
   }
 
   /**
-   * Handle auth:revoked from server (disconnected or expired).
+   * Handle auth:revoked from server.
    */
   function handleRevoked(data) {
     const reason = data.reason || 'revoked';

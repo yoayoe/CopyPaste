@@ -292,12 +292,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (file.path == null) return;
 
     final appService = ref.read(appServiceProvider);
+    final hasPeers = appService.pairingService.peers.isNotEmpty;
 
-    // Send to all paired desktops.
+    // Send to all paired desktops (creates transfer task in Files tab).
     await appService.sendFileToAllPeers(file.path!);
 
     // Also share to mobile web clients for download.
-    appService.shareFileToMobile(file.path!, file.name, file.size);
+    // Only add to desktop Files tab if no peer transfer already created it.
+    appService.shareFileToMobile(file.path!, file.name, file.size,
+        addToDesktopList: !hasPeers);
   }
 
   void _showConnectDialog(BuildContext context) {
@@ -405,7 +408,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final appService = ref.read(appServiceProvider);
     showDialog(
       context: context,
-      builder: (_) => QrCodePanel(url: appService.webUrl),
+      builder: (_) => QrCodePanel(
+        url: appService.webUrl,
+        isTls: appService.isTlsEnabled,
+        onTlsToggle: (enabled) async {
+          await appService.setTlsEnabled(enabled);
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('TLS ${enabled ? 'enabled' : 'disabled'} — restart app to apply'),
+              action: SnackBarAction(label: 'OK', onPressed: () {}),
+            ),
+          );
+        },
+      ),
     );
   }
 }
