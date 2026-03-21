@@ -84,7 +84,8 @@ class _TransferTile extends StatelessWidget {
     // Open the containing folder.
     final dir = file.parent.path;
     if (Platform.isWindows) {
-      Process.run('explorer', ['/select,', path]);
+      final winPath = path.replaceAll('/', '\\');
+      Process.run('explorer', ['/select,$winPath']);
     } else if (Platform.isMacOS) {
       Process.run('open', ['-R', path]);
     } else if (Platform.isLinux) {
