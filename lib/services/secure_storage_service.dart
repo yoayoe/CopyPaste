@@ -48,6 +48,9 @@ class SecureStorageService {
   SecureStorageService()
       : _storage = const FlutterSecureStorage(
           aOptions: AndroidOptions(encryptedSharedPreferences: true),
+          mOptions: MacOsOptions(
+            useDataProtectionKeyChain: false,
+          ),
         );
 
   /// Save a paired peer's info and session key.
