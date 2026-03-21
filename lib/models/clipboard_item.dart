@@ -1,6 +1,4 @@
-import 'dart:typed_data';
-
-enum ClipboardItemType { text, image }
+enum ClipboardItemType { text }
 
 class ClipboardItem {
   final String id;
@@ -10,12 +8,6 @@ class ClipboardItem {
   final String? sourceDeviceName;
   final DateTime timestamp;
 
-  /// For image items: raw image bytes (for display).
-  final Uint8List? imageData;
-
-  /// For image items: download URL for web clients.
-  final String? downloadId;
-
   const ClipboardItem({
     required this.id,
     required this.type,
@@ -23,8 +15,6 @@ class ClipboardItem {
     this.sourceDeviceId,
     this.sourceDeviceName,
     required this.timestamp,
-    this.imageData,
-    this.downloadId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -34,7 +24,6 @@ class ClipboardItem {
         'sourceDeviceId': sourceDeviceId,
         'sourceDeviceName': sourceDeviceName,
         'timestamp': timestamp.millisecondsSinceEpoch,
-        if (downloadId != null) 'downloadId': downloadId,
       };
 
   factory ClipboardItem.fromJson(Map<String, dynamic> json) => ClipboardItem(
@@ -45,12 +34,9 @@ class ClipboardItem {
         sourceDeviceName: json['sourceDeviceName'] as String?,
         timestamp:
             DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
-        downloadId: json['downloadId'] as String?,
       );
 
-  String get preview => type == ClipboardItemType.image
-      ? content
-      : content.length > 100
-          ? '${content.substring(0, 100)}...'
-          : content;
+  String get preview => content.length > 100
+      ? '${content.substring(0, 100)}...'
+      : content;
 }

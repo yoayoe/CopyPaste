@@ -61,10 +61,6 @@ class PairingService {
   void Function(String content, String sourceDeviceId, String sourceDeviceName)?
       onClipboardReceived;
 
-  /// Image clipboard received from a paired peer.
-  void Function(Uint8List imageData, String mimeType, String sourceDeviceId,
-      String sourceDeviceName)? onImageClipboardReceived;
-
   /// File message received from a paired peer.
   void Function(Message message)? onFileReceived;
 
@@ -169,27 +165,6 @@ class PairingService {
     }
   }
 
-  /// Send image clipboard to all paired peers.
-  Future<void> broadcastImage(
-      Uint8List imageData, String senderId, String senderName) async {
-    for (final peer in _peers.values.toList()) {
-      if (peer.state != PeerState.paired) continue;
-
-      final hmac = peer.sessionKey != null
-          ? await _computeHmacBytes(peer.sessionKey!, imageData)
-          : null;
-
-      final msg = Message.image(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        senderId: senderId,
-        imageData: imageData,
-        senderName: senderName,
-        hmac: hmac,
-      );
-      await peer.send(msg);
-    }
-  }
-
   /// Send clipboard text to all paired peers.
   Future<void> broadcastClipboard(String content, String senderId, String senderName) async {
     for (final peer in _peers.values.toList()) {
@@ -247,8 +222,6 @@ class PairingService {
         _handlePairConfirm(message, peer);
       case MessageType.text:
         _handleText(message, peer);
-      case MessageType.image:
-        _handleImage(message, peer);
       case MessageType.file:
         if (peer.state == PeerState.paired) {
           onFileReceived?.call(message);
@@ -441,38 +414,6 @@ class PairingService {
     final senderName = message.meta['senderName'] as String? ?? peer.deviceName;
 
     onClipboardReceived?.call(content, senderId, senderName);
-  }
-
-  Future<void> _handleImage(Message message, PeerConnection peer) async {
-    if (peer.state != PeerState.paired) {
-      Log.w(_tag, 'Image from unpaired peer ${peer.ip}, ignoring');
-      return;
-    }
-
-    // Verify HMAC if session key exists.
-    if (peer.sessionKey != null) {
-      final receivedHmac = message.meta['hmac'] as String?;
-      if (receivedHmac == null) {
-        Log.w(_tag, 'No HMAC in image message from ${peer.deviceName}');
-        return;
-      }
-
-      final expectedHmac =
-          await _computeHmacBytes(peer.sessionKey!, message.payload);
-      if (receivedHmac != expectedHmac) {
-        Log.w(_tag, 'Invalid HMAC in image from ${peer.deviceName}');
-        return;
-      }
-    }
-
-    final mimeType = message.meta['mimeType'] as String? ?? 'image/png';
-    final senderId = message.meta['sender'] as String? ?? peer.deviceId;
-    final senderName =
-        message.meta['senderName'] as String? ?? peer.deviceName;
-
-    Log.i(_tag, 'Image from $senderName: ${message.payload.length} bytes ($mimeType)');
-    onImageClipboardReceived?.call(
-        message.payload, mimeType, senderId, senderName);
   }
 
   void _handleDisconnectMsg(PeerConnection peer) {

@@ -110,7 +110,7 @@
 - Clipboard & file history tidak di-persist (hanya in-memory) — hilang saat restart, bisa ditambah di v2
 
 #### Phase 6: Polish & UX
-- [ ] Image clipboard support
+- [ ] ~~Image clipboard support~~ — deferred (gunakan file transfer untuk kirim gambar)
 - [ ] Desktop notifications
 - [ ] System tray (Linux) / menu bar (macOS) — minimize to background
 - [ ] Web client PWA support (add to homescreen)

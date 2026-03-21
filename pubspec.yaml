@@ -31,9 +31,6 @@ dependencies:
   local_notifier: ^0.1.6
   window_manager: ^0.4.3
 
-  # Clipboard (image support)
-  pasteboard: ^0.2.0
-
   # Storage & Utils
   flutter_secure_storage: ^9.2.4
   shared_preferences: ^2.5.3

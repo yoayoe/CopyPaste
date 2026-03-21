@@ -30,6 +30,3 @@ const kSessionDuration = Duration(hours: 24);
 
 /// Clipboard polling interval (for platforms without native listener).
 const kClipboardPollInterval = Duration(milliseconds: 500);
-
-/// Maximum image clipboard size (10MB).
-const kMaxImageClipboardSize = 10 * 1024 * 1024;

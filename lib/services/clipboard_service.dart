@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:pasteboard/pasteboard.dart';
-import 'package:cryptography/cryptography.dart';
 import '../utils/constants.dart';
 import '../utils/logger.dart';
 
@@ -11,15 +9,13 @@ const _tag = 'Clipboard';
 class ClipboardService {
   Timer? _pollTimer;
   String _lastContent = '';
-  String _lastImageHash = '';
 
   /// Timestamp-based suppression: ignore changes until this time.
   DateTime _suppressUntil = DateTime(0);
 
   final void Function(String content)? onClipboardChanged;
-  final void Function(Uint8List imageData)? onImageClipboardChanged;
 
-  ClipboardService({this.onClipboardChanged, this.onImageClipboardChanged});
+  ClipboardService({this.onClipboardChanged});
 
   /// Start polling the clipboard for changes.
   void startMonitoring() {
@@ -33,13 +29,6 @@ class ClipboardService {
     if (_isSuppressed) return;
 
     try {
-      // Check image clipboard first (higher priority).
-      if (onImageClipboardChanged != null) {
-        final imageChanged = await _pollImage();
-        if (imageChanged) return; // Image changed — skip text check.
-      }
-
-      // Check text.
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final content = data?.text ?? '';
 
@@ -49,38 +38,6 @@ class ClipboardService {
       }
     } catch (e) {
       // Clipboard may be unavailable momentarily.
-    }
-  }
-
-  /// Returns true if a new image was detected.
-  Future<bool> _pollImage() async {
-    try {
-      final imageBytes = await Pasteboard.image;
-      if (imageBytes == null || imageBytes.isEmpty) return false;
-
-      if (imageBytes.length > kMaxImageClipboardSize) {
-        return false;
-      }
-
-      // Hash-based change detection.
-      final hash = await _hashBytes(imageBytes);
-      if (hash == _lastImageHash) return false;
-
-      _lastImageHash = hash;
-
-      Log.i(_tag, 'Image clipboard changed: ${imageBytes.length} bytes');
-      onImageClipboardChanged?.call(imageBytes);
-
-      // Also update _lastContent to whatever text is on clipboard now,
-      // so we don't double-fire a text event for the image's text representation.
-      try {
-        final data = await Clipboard.getData(Clipboard.kTextPlain);
-        _lastContent = data?.text ?? _lastContent;
-      } catch (_) {}
-
-      return true;
-    } catch (e) {
-      return false;
     }
   }
 
@@ -98,42 +55,9 @@ class ClipboardService {
     return data?.text ?? '';
   }
 
-  /// Write image (PNG) to the system clipboard.
-  Future<void> writeImage(Uint8List imageData) async {
-    _suppress();
-    await Pasteboard.writeImage(imageData);
-
-    // Read back the actual hash (pasteboard may re-encode).
-    try {
-      final readBack = await Pasteboard.image;
-      if (readBack != null) {
-        _lastImageHash = await _hashBytes(readBack);
-      }
-    } catch (_) {}
-
-    // Also capture whatever text representation was set.
-    try {
-      final data = await Clipboard.getData(Clipboard.kTextPlain);
-      if (data?.text != null) _lastContent = data!.text!;
-    } catch (_) {}
-
-    Log.d(_tag, 'Written image: ${imageData.length} bytes');
-  }
-
-  /// Read current clipboard image.
-  Future<Uint8List?> readImage() async {
-    return await Pasteboard.image;
-  }
-
   /// Suppress all change detection for a short window.
   void _suppress() {
     _suppressUntil = DateTime.now().add(const Duration(seconds: 2));
-  }
-
-  Future<String> _hashBytes(Uint8List data) async {
-    final algo = Sha256();
-    final hash = await algo.hash(data);
-    return hash.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
   void stopMonitoring() {

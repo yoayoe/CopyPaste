@@ -40,30 +40,6 @@ class Message {
     );
   }
 
-  /// Create an image clipboard message.
-  factory Message.image({
-    required String id,
-    required String senderId,
-    required Uint8List imageData,
-    String mimeType = 'image/png',
-    String? senderName,
-    String? hmac,
-  }) {
-    return Message(
-      type: MessageType.image,
-      meta: {
-        'id': id,
-        'sender': senderId,
-        if (senderName != null) 'senderName': senderName,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'mimeType': mimeType,
-        'size': imageData.length,
-        if (hmac != null) 'hmac': hmac,
-      },
-      payload: imageData,
-    );
-  }
-
   /// Create a ping message.
   factory Message.ping(String senderId) => Message(
         type: MessageType.ping,
