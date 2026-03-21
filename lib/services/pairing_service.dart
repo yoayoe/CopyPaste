@@ -614,15 +614,39 @@ class PairingService {
 
     final knownPeers = await secureStorage!.loadAllPairedPeers();
     Log.i(_tag, 'Known peers in storage: ${knownPeers.keys.toList()}');
-    final known = knownPeers[senderId];
+    var known = knownPeers[senderId];
+    String effectiveId = senderId;
+
+    // Fallback: look up by IP if device ID changed (e.g. after reinstall).
     if (known == null) {
-      Log.w(_tag, 'Reconnect from unknown device: $senderId (not in our storage)');
+      Log.i(_tag, 'Device ID $senderId not found, trying IP lookup (${peer.ip})...');
+      for (final entry in knownPeers.entries) {
+        if (entry.value.$1.lastKnownIp == peer.ip) {
+          Log.i(_tag, 'Found peer by IP match: old ID=${entry.key}, new ID=$senderId');
+          known = entry.value;
+          effectiveId = entry.key;
+          break;
+        }
+      }
+    }
+
+    if (known == null) {
+      Log.w(_tag, 'Reconnect from unknown device: $senderId (not in storage, no IP match)');
       await peer.send(Message.reject('Unknown device'));
       return;
     }
-    Log.i(_tag, 'Found stored session key for $senderId, proceeding with auth');
+    Log.i(_tag, 'Found stored session key for $effectiveId, proceeding with auth');
 
     final sessionKey = known.$2;
+
+    // If device ID changed, migrate storage now.
+    if (effectiveId != senderId) {
+      Log.i(_tag, 'Migrating device ID: $effectiveId → $senderId');
+      peer.deviceName = senderName;
+      peer.platform = platform;
+      peer.remoteTcpPort = tcpPort;
+      await _migrateDeviceId(effectiveId, senderId, peer, sessionKey);
+    }
 
     // Prove we have the key: HMAC(sessionKey, challenge).
     final response = await _computeHmacBytes(sessionKey, utf8.encode(challenge));
@@ -634,7 +658,7 @@ class PairingService {
     peer.platform = platform;
     peer.remoteTcpPort = tcpPort;
 
-    // Store temporarily to verify their response.
+    // Store temporarily to verify their response — use the real sender ID.
     _pendingReconnects[senderId] = (peer, ourChallenge, sessionKey);
 
     await peer.send(Message.reconnectConfirm(
@@ -673,10 +697,15 @@ class PairingService {
         }
       }
       if (matchedId != null) {
-        Log.i(_tag, 'Found pending reconnect by peer reference: $matchedId');
+        Log.i(_tag, 'Found pending reconnect by peer reference: stored=$matchedId, actual=$senderId');
         final p = _pendingReconnects.remove(matchedId)!;
+        // Use the real sender ID, and migrate storage if ID changed.
+        if (matchedId != senderId) {
+          Log.i(_tag, 'Device ID changed: $matchedId → $senderId, migrating storage');
+          await _migrateDeviceId(matchedId, senderId, peer, p.$3);
+        }
         await _finalizeReconnect(
-            matchedId, peer, senderName, platform, p.$3, tcpPort);
+            senderId, peer, senderName, platform, p.$3, tcpPort);
         return;
       }
 
@@ -730,6 +759,27 @@ class PairingService {
 
     onPeerPaired?.call(deviceId, name, platform, peer.ip);
     Log.i(_tag, 'Reconnected with $name ($deviceId)');
+  }
+
+  /// Migrate storage when a peer's device ID changes (e.g. after reinstall).
+  Future<void> _migrateDeviceId(
+      String oldId, String newId, PeerConnection peer, List<int> sessionKey) async {
+    if (secureStorage == null) return;
+    // Remove old entry.
+    await secureStorage!.removePairedPeer(oldId);
+    // Save under new ID (savePairedPeer handles dedup by IP).
+    await secureStorage!.savePairedPeer(
+      PairedPeerInfo(
+        deviceId: newId,
+        deviceName: peer.deviceName,
+        platform: peer.platform,
+        lastKnownIp: peer.ip,
+        lastKnownPort: peer.remoteTcpPort ?? peer.port,
+      ),
+      sessionKey,
+    );
+    // Also update _peers map.
+    _peers.remove(oldId);
   }
 
   void _savePeerToStorage(String deviceId, PeerConnection peer) {
