@@ -51,6 +51,11 @@ class EmbeddedWebServer {
   /// Directory for received file storage.
   String? _downloadDir;
 
+  /// Set the directory for storing received files (must be sandbox-accessible).
+  void setDownloadDir(String dir) {
+    _downloadDir = dir;
+  }
+
   /// Called when a file is uploaded from mobile.
   void Function(String fileId, String filename, int size, String checksum, String savedPath)? onFileUploaded;
 

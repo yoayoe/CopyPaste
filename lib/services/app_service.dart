@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../core/discovery/discovery_service.dart';
 import '../core/network/tcp_server.dart';
@@ -161,9 +162,15 @@ class AppService {
     clipboard.startMonitoring();
 
     // 5. Initialize file transfer service.
-    fileTransfer = FileTransferService();
+    // Use app support directory (sandbox-safe on macOS) instead of system temp.
+    final appSupportDir = await getApplicationSupportDirectory();
+    final filesDir = '${appSupportDir.path}/received_files';
+    fileTransfer = FileTransferService(downloadDir: filesDir);
     await fileTransfer.init();
     _wireFileTransferCallbacks();
+
+    // Set the same directory for web server file uploads.
+    webServer.setDownloadDir(filesDir);
 
     // Wire file upload from mobile.
     webServer.onFileUploaded = (fileId, filename, size, checksum, savedPath) {
