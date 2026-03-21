@@ -54,6 +54,7 @@ class SecureStorageService {
         );
 
   /// Save a paired peer's info and session key.
+  /// Deduplicates: removes any existing entries with the same IP but different ID.
   Future<void> savePairedPeer(PairedPeerInfo info, List<int> sessionKey) async {
     try {
       Log.i(_tag, 'Saving peer: ${info.deviceName} (${info.deviceId}) at ${info.lastKnownIp}:${info.lastKnownPort}');
@@ -65,21 +66,27 @@ class SecureStorageService {
         value: keyB64,
       );
 
-      // Verify key was written.
-      final verifyKey = await _storage.read(key: '$_sessionKeyPrefix${info.deviceId}');
-      Log.i(_tag, 'Session key saved: ${verifyKey != null ? 'YES' : 'NO (FAILED!)'}');
-
-      // Update peer list.
+      // Update peer list, removing stale entries for the same IP.
       final peers = await _loadPeerMap();
+      final staleIds = <String>[];
+      for (final entry in peers.entries) {
+        if (entry.key != info.deviceId) {
+          final existingIp = (entry.value as Map<String, dynamic>)['lastKnownIp'];
+          if (existingIp == info.lastKnownIp) {
+            staleIds.add(entry.key);
+          }
+        }
+      }
+      for (final staleId in staleIds) {
+        Log.i(_tag, 'Removing stale entry for same IP: $staleId');
+        peers.remove(staleId);
+        await _storage.delete(key: '$_sessionKeyPrefix$staleId');
+      }
+
       peers[info.deviceId] = info.toJson();
-      final peerJson = jsonEncode(peers);
-      await _storage.write(key: _peerListKey, value: peerJson);
+      await _storage.write(key: _peerListKey, value: jsonEncode(peers));
 
-      // Verify peer list was written.
-      final verifyPeers = await _storage.read(key: _peerListKey);
-      Log.i(_tag, 'Peer list saved: ${verifyPeers != null ? 'YES (${verifyPeers.length} bytes)' : 'NO (FAILED!)'}');
-
-      Log.i(_tag, 'Saved peer: ${info.deviceName} (${info.deviceId})');
+      Log.i(_tag, 'Saved peer: ${info.deviceName} (${info.deviceId}), total: ${peers.length}');
     } catch (e) {
       Log.e(_tag, 'Failed to save peer', e);
     }
@@ -101,8 +108,12 @@ class SecureStorageService {
   }
 
   /// Load all paired peers with their session keys.
+  /// Deduplicates on load: only keeps one entry per IP (first found wins).
   Future<Map<String, (PairedPeerInfo, List<int>)>> loadAllPairedPeers() async {
     final result = <String, (PairedPeerInfo, List<int>)>{};
+    final seenIps = <String>{};
+    final staleIds = <String>[];
+
     try {
       final peers = await _loadPeerMap();
       Log.i(_tag, 'Raw peer map has ${peers.length} entries: ${peers.keys.toList()}');
@@ -110,15 +121,35 @@ class SecureStorageService {
       for (final entry in peers.entries) {
         final info = PairedPeerInfo.fromJson(
             entry.value as Map<String, dynamic>);
+
+        // Skip duplicate IPs.
+        if (seenIps.contains(info.lastKnownIp)) {
+          Log.w(_tag, 'Duplicate IP ${info.lastKnownIp} for ${info.deviceId}, removing stale entry');
+          staleIds.add(info.deviceId);
+          continue;
+        }
+
         final keyB64 = await _storage.read(
             key: '$_sessionKeyPrefix${info.deviceId}');
         if (keyB64 != null) {
           final sessionKey = base64Decode(keyB64);
           result[info.deviceId] = (info, sessionKey);
+          seenIps.add(info.lastKnownIp);
           Log.i(_tag, 'Loaded peer: ${info.deviceName} (${info.deviceId}) at ${info.lastKnownIp}:${info.lastKnownPort}');
         } else {
-          Log.w(_tag, 'No session key found for ${info.deviceName} (${info.deviceId})');
+          Log.w(_tag, 'No session key found for ${info.deviceName} (${info.deviceId}), removing');
+          staleIds.add(info.deviceId);
         }
+      }
+
+      // Clean up stale entries.
+      if (staleIds.isNotEmpty) {
+        for (final id in staleIds) {
+          peers.remove(id);
+          await _storage.delete(key: '$_sessionKeyPrefix$id');
+        }
+        await _storage.write(key: _peerListKey, value: jsonEncode(peers));
+        Log.i(_tag, 'Cleaned up ${staleIds.length} stale entries');
       }
 
       Log.i(_tag, 'Loaded ${result.length} paired peers');
