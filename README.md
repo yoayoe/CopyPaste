@@ -205,14 +205,18 @@ chmod +x scripts/build-dmg.sh
 ### Windows
 
 ```powershell
-# Build Flutter release
-flutter build windows --release
+# Prerequisites: Inno Setup (for installer)
+winget install JRSoftware.InnoSetup
 
-# Or use the build script (includes icon conversion + ZIP packaging)
+# Build Flutter release + installer + portable ZIP
 powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 
-# Output: build\CopyPaste_0.3.0_Windows.zip
+# Output:
+#   build\CopyPaste_0.4.0_Windows_Setup.exe  ← installer
+#   build\CopyPaste_0.4.0_Windows.zip        ← portable
 ```
+
+> See [docs/WINDOWS-BUILD-GUIDE.md](docs/WINDOWS-BUILD-GUIDE.md) for detailed setup and Inno Setup configuration.
 
 ## Project Structure
 
@@ -275,7 +279,8 @@ copy-paste/
 ├── scripts/
 │   ├── build-deb.sh              # Linux .deb package builder
 │   ├── build-dmg.sh              # macOS .dmg package builder
-│   └── build-windows.ps1         # Windows ZIP package builder
+│   ├── build-windows.ps1         # Windows installer + ZIP builder
+│   └── installer.iss             # Inno Setup script for .exe installer
 ├── docs/
 │   ├── ARCHITECTURE.md           # Full architecture documentation
 │   ├── DEVELOPMENT-PHASES.md     # Development roadmap & progress
@@ -312,7 +317,7 @@ See [docs/DEVELOPMENT-PHASES.md](docs/DEVELOPMENT-PHASES.md) for development pro
 | File transfer | Chunked TCP (64KB) + HTTP multipart + SHA-256 checksum |
 | Device discovery | mDNS/DNS-SD via `nsd` (macOS), manual IP (Linux/Windows) |
 | Web client | Vanilla HTML/CSS/JS (< 50KB, no framework) |
-| Packaging | .deb (Linux), .dmg (macOS), .zip (Windows) |
+| Packaging | .deb (Linux), .dmg (macOS), .exe installer + .zip (Windows) |
 
 ### Running Tests
 

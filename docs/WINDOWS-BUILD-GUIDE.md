@@ -164,9 +164,27 @@ msix_config:
 
 ### Option 2: Inno Setup (.exe Installer)
 
-1. Download Inno Setup: https://jrsoftware.org/isdl.php
-2. Buat script `.iss` yang point ke `build\windows\x64\runner\Release\`
-3. Compile menjadi `.exe` installer
+Script `.iss` sudah tersedia di `scripts/installer.iss`.
+
+**Install Inno Setup:**
+```powershell
+winget install JRSoftware.InnoSetup
+```
+
+> Inno Setup bisa terinstall di `%LOCALAPPDATA%\Programs\Inno Setup 6\` (user install) atau `Program Files (x86)\Inno Setup 6\` (system install). Build script otomatis mendeteksi keduanya.
+
+**Build installer:**
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+```
+
+Output: `build\CopyPaste_0.4.0_Windows_Setup.exe`
+
+Installer akan:
+- Install app ke `Program Files\CopyPaste`
+- Buat shortcut di Start Menu
+- Opsi shortcut Desktop & startup otomatis
+- Include uninstaller
 
 ### Option 3: Portable (ZIP)
 

@@ -4,6 +4,7 @@
 # Prerequisites:
 #   - Flutter SDK (3.41.0+)
 #   - Visual Studio 2022 with "Desktop development with C++" workload
+#   - Inno Setup 6+ (winget install JRSoftware.InnoSetup)
 #   - ImageMagick (optional, for icon conversion)
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,9 @@ $RELEASE_DIR = Join-Path $BUILD_DIR "windows\x64\runner\Release"
 $WINDOWS_DIR = Join-Path $PROJECT_DIR "windows"
 $ICON_SRC = Join-Path $PROJECT_DIR "assets\icons\app_icon.png"
 $ICON_DST = Join-Path $PROJECT_DIR "windows\runner\resources\app_icon.ico"
+$ISS_FILE = Join-Path $SCRIPT_DIR "installer.iss"
+$INSTALLER_NAME = $APP_DISPLAY_NAME + "_" + $APP_VERSION + "_Windows_Setup.exe"
+$OUTPUT_INSTALLER = Join-Path $BUILD_DIR $INSTALLER_NAME
 $ZIP_NAME = $APP_DISPLAY_NAME + "_" + $APP_VERSION + "_Windows.zip"
 $OUTPUT_ZIP = Join-Path $BUILD_DIR $ZIP_NAME
 
@@ -27,7 +31,7 @@ Write-Host "Project: $PROJECT_DIR"
 Write-Host ""
 
 # --- Step 1: Check prerequisites ---
-Write-Host "[1/6] Checking prerequisites..." -ForegroundColor Yellow
+Write-Host "[1/7] Checking prerequisites..." -ForegroundColor Yellow
 
 $flutterCmd = Get-Command flutter -ErrorAction SilentlyContinue
 if (-not $flutterCmd) {
@@ -37,9 +41,23 @@ if (-not $flutterCmd) {
 $flutterVer = flutter --version 2>&1 | Select-Object -First 1
 Write-Host "  Flutter: $flutterVer"
 
+# Check Inno Setup
+$innoPath = @(
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($innoPath) {
+    Write-Host "  Inno Setup: $innoPath"
+} else {
+    Write-Host "  WARNING: Inno Setup not found. Installer will not be created." -ForegroundColor DarkYellow
+    Write-Host "  Install: winget install JRSoftware.InnoSetup" -ForegroundColor DarkGray
+}
+
 # --- Step 2: Generate Windows platform files if needed ---
 Write-Host ""
-Write-Host "[2/6] Checking Windows platform files..." -ForegroundColor Yellow
+Write-Host "[2/7] Checking Windows platform files..." -ForegroundColor Yellow
 Set-Location $PROJECT_DIR
 
 if (-not (Test-Path $WINDOWS_DIR)) {
@@ -52,7 +70,7 @@ if (-not (Test-Path $WINDOWS_DIR)) {
 
 # --- Step 3: Convert app icon ---
 Write-Host ""
-Write-Host "[3/6] Setting app icon..." -ForegroundColor Yellow
+Write-Host "[3/7] Setting app icon..." -ForegroundColor Yellow
 
 $iconConverted = $false
 
@@ -85,7 +103,7 @@ if (Test-Path $ICON_SRC) {
     if (-not $iconConverted) {
         Write-Host "  WARNING: Cannot convert icon. Install ImageMagick or Python+Pillow" -ForegroundColor DarkYellow
         Write-Host "  Install: winget install ImageMagick.ImageMagick" -ForegroundColor DarkGray
-        Write-Host "  Or:      pip install Pillow" -ForegroundColor DarkGray
+        Write-Host "  Or:      py -m pip install Pillow" -ForegroundColor DarkGray
         Write-Host "  Using default Flutter icon."
     }
 } else {
@@ -94,13 +112,13 @@ if (Test-Path $ICON_SRC) {
 
 # --- Step 4: Get dependencies ---
 Write-Host ""
-Write-Host "[4/6] Getting dependencies..." -ForegroundColor Yellow
+Write-Host "[4/7] Getting dependencies..." -ForegroundColor Yellow
 flutter pub get
 Write-Host "  Done."
 
 # --- Step 5: Build release ---
 Write-Host ""
-Write-Host "[5/6] Building Windows release..." -ForegroundColor Yellow
+Write-Host "[5/7] Building Windows release..." -ForegroundColor Yellow
 flutter build windows --release
 
 if (-not (Test-Path $RELEASE_DIR)) {
@@ -109,22 +127,42 @@ if (-not (Test-Path $RELEASE_DIR)) {
 }
 Write-Host "  Build complete: $RELEASE_DIR"
 
-# --- Step 6: Package as ZIP ---
+# --- Step 6: Create installer ---
 Write-Host ""
-Write-Host "[6/6] Packaging..." -ForegroundColor Yellow
+Write-Host "[6/7] Creating installer..." -ForegroundColor Yellow
+
+if ($innoPath) {
+    Set-Location $PROJECT_DIR
+    & $innoPath $ISS_FILE
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: Inno Setup failed (exit code $LASTEXITCODE)" -ForegroundColor Red
+        exit 1
+    }
+    $installerSize = [math]::Round((Get-Item $OUTPUT_INSTALLER).Length / 1MB, 1)
+    Write-Host "  Installer: $OUTPUT_INSTALLER ($installerSize MB)"
+} else {
+    Write-Host "  Skipping installer (Inno Setup not installed)." -ForegroundColor DarkYellow
+}
+
+# --- Step 7: Package as ZIP (portable) ---
+Write-Host ""
+Write-Host "[7/7] Packaging portable ZIP..." -ForegroundColor Yellow
 
 if (Test-Path $OUTPUT_ZIP) {
     Remove-Item $OUTPUT_ZIP -Force
 }
 
 Compress-Archive -Path (Join-Path $RELEASE_DIR "*") -DestinationPath $OUTPUT_ZIP
-Write-Host "  Package: $OUTPUT_ZIP"
+$zipSize = [math]::Round((Get-Item $OUTPUT_ZIP).Length / 1MB, 1)
+Write-Host "  ZIP: $OUTPUT_ZIP ($zipSize MB)"
 
 # --- Done ---
-$zipSize = [math]::Round((Get-Item $OUTPUT_ZIP).Length / 1MB, 1)
 Write-Host ""
 Write-Host "=== Done! ===" -ForegroundColor Green
-Write-Host "ZIP:  $OUTPUT_ZIP"
-Write-Host "Size: $zipSize MB"
+if ($innoPath) {
+    Write-Host "Installer: $OUTPUT_INSTALLER"
+}
+Write-Host "Portable:  $OUTPUT_ZIP"
 Write-Host ""
-Write-Host "To run: extract ZIP and run copypaste.exe"
+Write-Host "To install: run $INSTALLER_NAME"
+Write-Host "To run portable: extract ZIP and run copypaste.exe"
