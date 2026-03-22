@@ -4,6 +4,19 @@ Open-source, self-hosted clipboard sharing and file transfer tool across devices
 
 **Copy on one device, paste on another.**
 
+## Download
+
+Download the latest version from the [Releases](https://github.com/yoayoe/CopyPaste/releases/latest) page.
+
+| Platform | File | Type |
+|----------|------|------|
+| Linux | `copypaste_x.x.x_amd64.deb` | Debian package |
+| macOS | `CopyPaste_x.x.x.dmg` | Disk image |
+| Windows | `CopyPaste_x.x.x_Windows_Setup.exe` | Installer |
+| Windows | `CopyPaste_x.x.x_Windows.zip` | Portable (no install) |
+
+> **Windows users**: Choose the **Setup.exe** for a standard installation, or the **ZIP** for a portable version you can run from any folder without installing.
+
 ## How It Works
 
 ```
@@ -186,7 +199,7 @@ chmod +x scripts/build-deb.sh
 ./scripts/build-deb.sh
 
 # Install .deb
-sudo dpkg -i build/copypaste_0.1.0_amd64.deb
+sudo dpkg -i build/copypaste_0.4.0_amd64.deb
 ```
 
 ### macOS
@@ -199,7 +212,7 @@ flutter build macos --release
 chmod +x scripts/build-dmg.sh
 ./scripts/build-dmg.sh
 
-# Output: build/CopyPaste_0.3.0.dmg
+# Output: build/CopyPaste_0.4.0.dmg
 ```
 
 ### Windows
