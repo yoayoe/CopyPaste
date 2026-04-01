@@ -116,7 +116,7 @@
 - [ ] Web client PWA support (add to homescreen)
 - [x] Dark/light theme (web client) ✅
 - [ ] Dark/light theme (desktop — sudah pakai ThemeMode.system)
-- [ ] Settings UI
+- [x] Settings UI ✅
 - [ ] Multi-file transfer
 
 #### Phase 7: v1 Release

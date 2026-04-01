@@ -16,6 +16,7 @@ import 'widgets/qr_code_panel.dart';
 import 'widgets/connect_dialog.dart';
 import 'widgets/pin_dialog.dart';
 import '../../services/notification_service.dart';
+import '../settings/settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -171,6 +172,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 );
               }
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
         ],
       ),
