@@ -12,8 +12,10 @@ class TrayService with TrayListener {
   Future<void> setup() async {
     trayManager.addListener(this);
 
-    // macOS uses template images (black & white, system handles coloring).
-    if (Platform.isMacOS) {
+    // Windows requires .ico, macOS uses template image, Linux uses PNG.
+    if (Platform.isWindows) {
+      await trayManager.setIcon('assets/icons/app_icon.ico');
+    } else if (Platform.isMacOS) {
       await trayManager.setIcon(
         'assets/icons/app_icon.png',
         isTemplate: true,
