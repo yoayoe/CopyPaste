@@ -31,11 +31,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _load() async {
     final appService = ref.read(appServiceProvider);
     final peers = await appService.secureStorage.loadAllPairedPeers();
-    final info = await PackageInfo.fromPlatform();
+    String version = '';
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (info.version.isNotEmpty) version = 'v${info.version}';
+    } catch (_) {}
     setState(() {
       _pairedPeers = peers.values.map((e) => e.$1).toList();
       _webSessions = appService.webClientSessions;
-      _version = 'v${info.version}';
+      _version = version;
       _loading = false;
     });
   }
@@ -204,14 +208,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
 
                 const SizedBox(height: 24),
-                Center(
-                  child: Text(
-                    'CopyPaste $_version',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
+                if (_version.isNotEmpty)
+                  Center(
+                    child: Text(
+                      'CopyPaste $_version',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                    ),
                   ),
-                ),
                 const SizedBox(height: 16),
               ],
             ),
