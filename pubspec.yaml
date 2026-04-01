@@ -39,6 +39,7 @@ dependencies:
   json_annotation: ^4.9.0
   pointycastle: ^4.0.0
   tray_manager: ^0.5.2
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:

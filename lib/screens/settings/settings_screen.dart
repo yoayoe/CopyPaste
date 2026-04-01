@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../main.dart';
 import '../../models/session_info.dart';
 import '../../providers/clipboard_provider.dart';
@@ -19,6 +20,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<PairedPeerInfo> _pairedPeers = [];
   List<SessionInfo> _webSessions = [];
   bool _loading = true;
+  String _version = '';
 
   @override
   void initState() {
@@ -29,9 +31,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _load() async {
     final appService = ref.read(appServiceProvider);
     final peers = await appService.secureStorage.loadAllPairedPeers();
+    final info = await PackageInfo.fromPlatform();
     setState(() {
       _pairedPeers = peers.values.map((e) => e.$1).toList();
       _webSessions = appService.webClientSessions;
+      _version = 'v${info.version}';
       _loading = false;
     });
   }
@@ -200,6 +204,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
 
                 const SizedBox(height: 24),
+                Center(
+                  child: Text(
+                    'CopyPaste $_version',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                  ),
+                ),
+                const SizedBox(height: 16),
               ],
             ),
     );
