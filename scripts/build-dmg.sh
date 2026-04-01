@@ -13,11 +13,11 @@ set -e
 
 APP_NAME="copypaste"
 APP_DISPLAY_NAME="CopyPaste"
-APP_VERSION="0.4.0"
 APP_BUNDLE_NAME="copypaste.app"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+APP_VERSION=$(grep '^version:' "$PROJECT_DIR/pubspec.yaml" | sed 's/version:[[:space:]]*//' | cut -d'+' -f1 | tr -d '[:space:]')
 BUILD_DIR="$PROJECT_DIR/build"
 MACOS_BUILD_DIR="$BUILD_DIR/macos/Build/Products/Release"
 DMG_DIR="$BUILD_DIR/dmg"

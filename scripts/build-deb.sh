@@ -8,7 +8,6 @@ set -e
 
 APP_NAME="copypaste"
 APP_DISPLAY_NAME="CopyPaste"
-APP_VERSION="0.4.0"
 APP_DESCRIPTION="Open-source clipboard sharing and file transfer over local network"
 APP_ID="com.copypaste.copypaste"
 MAINTAINER="CopyPaste Team <copypaste@localhost>"
@@ -16,6 +15,7 @@ ARCH="amd64"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+APP_VERSION=$(grep '^version:' "$PROJECT_DIR/pubspec.yaml" | sed 's/version:[[:space:]]*//' | cut -d'+' -f1 | tr -d '[:space:]')
 BUILD_DIR="$PROJECT_DIR/build"
 BUNDLE_DIR="$BUILD_DIR/linux/x64/release/bundle"
 DEB_DIR="$BUILD_DIR/${APP_NAME}_${APP_VERSION}_${ARCH}"

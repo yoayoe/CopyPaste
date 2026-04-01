@@ -1,5 +1,7 @@
 #define MyAppName "CopyPaste"
-#define MyAppVersion "0.4.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "Yoayoe"
 #define MyAppURL "https://github.com/yoayoe/CopyPaste"
 #define MyAppExeName "copypaste.exe"

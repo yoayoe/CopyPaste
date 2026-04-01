@@ -10,10 +10,12 @@
 $ErrorActionPreference = "Stop"
 
 $APP_DISPLAY_NAME = "CopyPaste"
-$APP_VERSION = "0.4.0"
 
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PROJECT_DIR = Split-Path -Parent $SCRIPT_DIR
+
+# Read version from pubspec.yaml
+$APP_VERSION = (Get-Content "$PROJECT_DIR\pubspec.yaml" | Select-String '^version:').ToString() -replace 'version:\s*', '' -replace '\+.*', '' -replace '\s', ''
 $BUILD_DIR = Join-Path $PROJECT_DIR "build"
 $RELEASE_DIR = Join-Path $BUILD_DIR "windows\x64\runner\Release"
 $WINDOWS_DIR = Join-Path $PROJECT_DIR "windows"
@@ -133,7 +135,7 @@ Write-Host "[6/7] Creating installer..." -ForegroundColor Yellow
 
 if ($innoPath) {
     Set-Location $PROJECT_DIR
-    & $innoPath $ISS_FILE
+    & $innoPath "/DMyAppVersion=$APP_VERSION" $ISS_FILE
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ERROR: Inno Setup failed (exit code $LASTEXITCODE)" -ForegroundColor Red
         exit 1
