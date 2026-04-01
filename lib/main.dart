@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'services/app_service.dart';
+import 'services/notification_service.dart';
 import 'screens/home/home_screen.dart';
 
 /// Global AppService provider.
@@ -20,6 +21,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await windowManager.ensureInitialized();
+  await NotificationService.setup();
 
   const windowOptions = WindowOptions(
     size: Size(420, 700),

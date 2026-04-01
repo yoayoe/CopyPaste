@@ -15,6 +15,7 @@ import 'widgets/transfer_list.dart';
 import 'widgets/qr_code_panel.dart';
 import 'widgets/connect_dialog.dart';
 import 'widgets/pin_dialog.dart';
+import '../../services/notification_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -242,6 +243,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             sourceDeviceId: sourceId,
             sourceDeviceName: sourceName,
           );
+      // Only notify when received from a remote device (sourceId != null).
+      if (sourceId != null) {
+        NotificationService.showClipboardReceived(sourceName ?? 'Unknown', content);
+      }
     };
 
     appService.onWebClientsChanged = (clients) {
@@ -319,6 +324,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${task.direction == TransferDirection.receive ? 'Received' : 'Sent'}: ${task.filename}')),
       );
+      if (task.direction == TransferDirection.receive) {
+        NotificationService.showFileReceived(task.filename, task.deviceName);
+      } else {
+        NotificationService.showFileSent(task.filename);
+      }
     };
     appService.onTransferFailed = (task, error) {
       if (!mounted) return;

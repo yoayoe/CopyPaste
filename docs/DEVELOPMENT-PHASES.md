@@ -111,7 +111,7 @@
 
 #### Phase 6: Polish & UX
 - [ ] ~~Image clipboard support~~ — deferred (gunakan file transfer untuk kirim gambar)
-- [ ] Desktop notifications
+- [x] Desktop notifications ✅
 - [ ] System tray (Linux) / menu bar (macOS) — minimize to background
 - [ ] Web client PWA support (add to homescreen)
 - [x] Dark/light theme (web client) ✅
