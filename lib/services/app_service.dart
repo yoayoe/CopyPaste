@@ -99,7 +99,7 @@ class AppService {
     final prefs = await SharedPreferences.getInstance();
     _deviceId = prefs.getString('device_id') ?? const Uuid().v4();
     await prefs.setString('device_id', _deviceId);
-    _deviceName = prefs.getString('device_name') ?? Platform.localHostname;
+    _deviceName = Platform.localHostname;
 
     // Initialize secure storage.
     secureStorage = SecureStorageService();
@@ -346,13 +346,6 @@ class AppService {
   /// Disconnect a paired desktop.
   Future<void> disconnectPeer(String deviceId) async {
     await pairingService.disconnectPeer(deviceId);
-  }
-
-  /// Update and persist the device name.
-  Future<void> updateDeviceName(String name) async {
-    _deviceName = name;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('device_name', name);
   }
 
   /// Active web client sessions.

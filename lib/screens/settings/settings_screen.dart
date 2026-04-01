@@ -16,7 +16,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  late TextEditingController _nameController;
   List<PairedPeerInfo> _pairedPeers = [];
   List<SessionInfo> _webSessions = [];
   bool _loading = true;
@@ -24,15 +23,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    final appService = ref.read(appServiceProvider);
-    _nameController = TextEditingController(text: appService.deviceName);
     _load();
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -43,17 +34,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _webSessions = appService.webClientSessions;
       _loading = false;
     });
-  }
-
-  Future<void> _saveDeviceName() async {
-    final name = _nameController.text.trim();
-    if (name.isEmpty) return;
-    final appService = ref.read(appServiceProvider);
-    await appService.updateDeviceName(name);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Device name updated')),
-    );
   }
 
   Future<void> _unpairDevice(String deviceId) async {
@@ -116,29 +96,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               children: [
                 // ── Device Info ──────────────────────────────────────
                 _sectionHeader('Device'),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(
-                            labelText: 'Device name',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onSubmitted: (_) => _saveDeviceName(),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: _saveDeviceName,
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                ),
+                _infoTile('Device Name', appService.deviceName),
                 _infoTile('Device ID', appService.deviceId, copyable: true),
                 _infoTile('Local IP', appService.localIp),
                 _infoTile('TCP Port', '${appService.tcpPort}'),
