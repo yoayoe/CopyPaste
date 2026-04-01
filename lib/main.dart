@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'services/app_service.dart';
 import 'services/notification_service.dart';
+import 'services/tray_service.dart';
 import 'screens/home/home_screen.dart';
 
 /// Global AppService provider.
@@ -22,6 +23,7 @@ void main() async {
 
   await windowManager.ensureInitialized();
   await NotificationService.setup();
+  await TrayService.instance.setup();
 
   const windowOptions = WindowOptions(
     size: Size(420, 700),
@@ -32,6 +34,7 @@ void main() async {
   );
 
   windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.setPreventClose(true);
     await windowManager.show();
     await windowManager.focus();
   });
@@ -46,11 +49,18 @@ class CopyPasteApp extends ConsumerStatefulWidget {
   ConsumerState<CopyPasteApp> createState() => _CopyPasteAppState();
 }
 
-class _CopyPasteAppState extends ConsumerState<CopyPasteApp> {
+class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener {
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
     _startServices();
+  }
+
+  @override
+  void onWindowClose() {
+    // Hide to tray instead of quitting.
+    windowManager.hide();
   }
 
   Future<String> _extractWebClient() async {
@@ -92,6 +102,8 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> {
 
   @override
   void dispose() {
+    windowManager.removeListener(this);
+    TrayService.instance.dispose();
     ref.read(appServiceProvider).stop();
     super.dispose();
   }
