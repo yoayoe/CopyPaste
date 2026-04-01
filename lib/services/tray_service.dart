@@ -56,15 +56,20 @@ class TrayService with TrayListener {
 
   @override
   void onTrayIconMouseDown() {
-    // Left click — toggle show/hide.
-    windowManager.isVisible().then((visible) {
-      if (visible) {
-        windowManager.hide();
-      } else {
-        windowManager.show();
-        windowManager.focus();
-      }
-    });
+    if (Platform.isMacOS) {
+      // macOS convention: left click on menu bar icon shows the context menu.
+      trayManager.popUpContextMenu();
+    } else {
+      // Linux / Windows: left click toggles show/hide.
+      windowManager.isVisible().then((visible) {
+        if (visible) {
+          windowManager.hide();
+        } else {
+          windowManager.show();
+          windowManager.focus();
+        }
+      });
+    }
   }
 
   @override

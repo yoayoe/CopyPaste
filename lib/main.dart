@@ -34,7 +34,6 @@ void main() async {
   );
 
   windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.setPreventClose(true);
     await windowManager.show();
     await windowManager.focus();
   });
@@ -54,13 +53,18 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    // Set prevent-close here so the listener is guaranteed to be registered first.
+    windowManager.setPreventClose(true);
     _startServices();
   }
 
   @override
-  void onWindowClose() {
+  void onWindowClose() async {
     // Hide to tray instead of quitting.
-    windowManager.hide();
+    final isPreventClose = await windowManager.isPreventClose();
+    if (isPreventClose) {
+      await windowManager.hide();
+    }
   }
 
   Future<String> _extractWebClient() async {
