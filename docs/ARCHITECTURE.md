@@ -10,20 +10,20 @@ CopyPaste menggunakan **arsitektur hybrid** dengan dua tipe client:
 
 | Tipe | Platform | Teknologi | Kapabilitas | Status |
 |------|----------|-----------|-------------|--------|
-| **Desktop App** | macOS, Linux | Flutter | Full-featured: auto clipboard sync, background service, file transfer, mDNS discovery, **embedded web server** | **v1 (Current Focus)** |
-| **Web Client** | Android, iOS (any mobile browser) | HTML/CSS/JS (SPA) | Manual clipboard (browser limitation), file transfer, **no install required** | **v1 (Current Focus)** |
-| **Desktop App** | Windows | Flutter | Same as macOS/Linux | **v2 (Future)** |
+| **Desktop App** | macOS, Linux | Flutter | Full-featured: auto clipboard sync, background service, file transfer, mDNS discovery, **embedded web server**, system tray | **v1 ✅** |
+| **Web Client** | Android, iOS (any mobile browser) | HTML/CSS/JS (SPA) | Manual clipboard (browser limitation), file transfer, **no install required**, PWA installable | **v1 ✅** |
+| **Desktop App** | Windows | Flutter | Same as macOS/Linux | **v2 ✅** |
 | **Mobile App** | Android, iOS | Flutter | Full-featured native mobile app dengan auto clipboard sync | **v3 (Future)** |
 
 Mobile device cukup **scan QR code** dari desktop app → buka browser → langsung pakai.
 
 ### Roadmap
 
-| Versi | Scope | Deskripsi |
-|-------|-------|-----------|
-| **v1** | macOS + Linux + Web Client | Desktop app untuk macOS & Linux dengan embedded web server. Mobile akses via browser. |
-| **v2** | + Windows | Tambah Windows desktop support. |
-| **v3** | + Mobile Native App | Flutter mobile app (Android/iOS) untuk full-featured experience di mobile. |
+| Versi | Scope | Deskripsi | Status |
+|-------|-------|-----------|--------|
+| **v1** | macOS + Linux + Web Client | Desktop app untuk macOS & Linux dengan embedded web server. Mobile akses via browser. | ✅ Released |
+| **v2** | + Windows | Tambah Windows desktop support, system tray, settings UI, notifications. | ✅ Released |
+| **v3** | + Mobile Native App | Flutter mobile app (Android/iOS) untuk full-featured experience di mobile. | Planned |
 
 ### Prinsip Desain
 
@@ -43,7 +43,8 @@ Mobile device cukup **scan QR code** dari desktop app → buka browser → langs
 │                                                                  │
 │  ┌────────────────────┐  TCP (P2P)  ┌────────────────────┐      │
 │  │   Desktop A        │◄═══════════►│   Desktop B        │      │
-│  │   (macOS)          │  mDNS       │   (Linux)          │      │
+│  │   (macOS/Linux/    │  mDNS       │   (macOS/Linux/    │      │
+│  │    Windows)        │  Discovery  │    Windows)        │      │
 │  │                    │  Discovery  │                    │      │
 │  │  ┌──────────────┐  │             │  ┌──────────────┐  │      │
 │  │  │ Flutter App  │  │             │  │ Flutter App  │  │      │
@@ -435,11 +436,11 @@ WebSocket menggunakan JSON messages yang lebih sederhana (browser-friendly).
 
 **Desktop ↔ Mobile (Current Implementation):**
 - **Authentication**: 6-digit PIN shown on desktop, entered on mobile
-- **PIN Verification**: Direct PIN match atau HMAC (fallback untuk non-HTTPS)
+- **PIN Verification**: Direct PIN match (HTTPS enforced — no fallback needed)
 - **Session Token**: Generated setelah PIN verified, saved di localStorage
 - **Auto-reconnect**: Token dikirim via WebSocket query param `?token=...`
-- **Transport**: HTTP + WS (local network only — acceptable security model)
-- **Future upgrade**: Self-signed TLS (HTTPS + WSS) untuk encrypted transport (Phase 5)
+- **Transport**: HTTPS + WSS dengan self-signed TLS certificate (pure Dart, no OpenSSL)
+- **Certificate**: Generated at first run, persisted to app support directory
 
 ---
 
@@ -482,9 +483,9 @@ Auto-monitor clipboard. Hanya berjalan di desktop app.
 **Platform-specific:**
 | Platform | Clipboard Access | Status |
 |----------|-----------------|--------|
-| macOS    | `NSPasteboard` + polling (`changeCount`) | v1 |
-| Linux    | `X11/Wayland clipboard` + monitoring | v1 |
-| Windows  | `Win32 Clipboard API` + `AddClipboardFormatListener` | v2 (Future) |
+| macOS    | `NSPasteboard` + polling (500ms) | ✅ |
+| Linux    | `X11/Wayland clipboard` + polling (500ms) | ✅ |
+| Windows  | Flutter Clipboard API + polling (500ms) | ✅ |
 
 ---
 
@@ -592,6 +593,108 @@ Menangani pengiriman dan penerimaan file. Berbeda flow untuk desktop dan mobile.
 │  - SHA-256 checksum verification                             │
 │  - Max file size configurable (default: 2GB)                │
 └──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 3.9 Desktop UX Layer
+
+Komponen tambahan untuk pengalaman desktop yang lengkap (ditambahkan di v0.5.0):
+
+#### System Tray / Menu Bar
+
+```
+┌──────────────────────────────────────────────────┐
+│              TrayService                         │
+│                                                  │
+│  Platform:                                       │
+│  - Linux  : AppIndicator3 (libayatana)           │
+│  - macOS  : NSStatusBar (menu bar)               │
+│  - Windows: Win32 Shell_NotifyIcon               │
+│                                                  │
+│  Icon:                                           │
+│  - Linux/Windows : app_icon.png / app_icon.ico   │
+│  - macOS         : app_icon.png (template image) │
+│                                                  │
+│  Behavior:                                       │
+│  - Close window → hide to tray (app stays alive) │
+│  - Left click (Linux/Win) → toggle show/hide     │
+│  - Left click (macOS) → show context menu        │
+│  - Right click → context menu                    │
+│                                                  │
+│  Context Menu:                                   │
+│  ┌─────────────────────┐                         │
+│  │ Show CopyPaste      │ → windowManager.show()  │
+│  │ ─────────────────── │                         │
+│  │ Quit                │ → windowManager.destroy()│
+│  └─────────────────────┘                         │
+└──────────────────────────────────────────────────┘
+```
+
+**macOS note:** `AppDelegate.applicationShouldTerminateAfterLastWindowClosed` di-set `false` agar app tidak terminate saat window ditutup.
+
+#### Desktop Notifications
+
+```
+┌──────────────────────────────────────────────────┐
+│              NotificationService                 │
+│              (local_notifier)                    │
+│                                                  │
+│  Trigger → Notification:                         │
+│                                                  │
+│  Clipboard received from remote device:          │
+│    Title : "Clipboard from <device>"             │
+│    Body  : Preview 60 chars pertama              │
+│    When  : sourceId != null (bukan local)        │
+│                                                  │
+│  File transfer complete (received):              │
+│    Title : "File received"                       │
+│    Body  : "<filename> from <device>"            │
+│                                                  │
+│  File transfer complete (sent):                  │
+│    Title : "File sent"                           │
+│    Body  : "<filename>"                          │
+│                                                  │
+│  Platform: Linux (libnotify), macOS, Windows     │
+└──────────────────────────────────────────────────┘
+```
+
+#### Settings Screen
+
+```
+┌──────────────────────────────────────────────────┐
+│              Settings Screen                     │
+│              (gear icon di AppBar)               │
+│                                                  │
+│  Sections:                                       │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Device Info (read-only)                  │    │
+│  │  - Device Name (from system hostname)    │    │
+│  │  - Device ID (copyable)                  │    │
+│  │  - Local IP, TCP Port, Web URL           │    │
+│  └──────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Appearance                               │    │
+│  │  - Theme toggle: Light / System / Dark   │    │
+│  │  - Persisted via SharedPreferences       │    │
+│  └──────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Paired Desktops                          │    │
+│  │  - List dari SecureStorage               │    │
+│  │  - Unpair button per device              │    │
+│  └──────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Mobile Web Sessions                      │    │
+│  │  - Active sessions list                  │    │
+│  │  - Revoke per session / revoke all       │    │
+│  └──────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Data                                     │    │
+│  │  - Clear clipboard history               │    │
+│  │  - Clear transfer history                │    │
+│  └──────────────────────────────────────────┘    │
+│  App version (CopyPaste vX.Y.Z)                  │
+└──────────────────────────────────────────────────┘
 ```
 
 ---
@@ -748,8 +851,12 @@ copy-paste/
 │   │   ├── clipboard_service.dart             # Clipboard monitor (500ms polling)
 │   │   ├── pairing_service.dart               # PIN-based pairing + HMAC-SHA256
 │   │   │                                      #   + HKDF session key derivation
-│   │   └── file_transfer_service.dart         # Chunked file transfer (64KB)
-│   │                                          #   + SHA-256 checksum verification
+│   │   ├── file_transfer_service.dart         # Chunked file transfer (64KB)
+│   │   │                                      #   + SHA-256 checksum verification
+│   │   ├── secure_storage_service.dart        # Encrypted storage (Keychain/libsecret/DPAPI)
+│   │   │                                      #   paired peers + session keys
+│   │   ├── tray_service.dart                  # System tray / menu bar (Linux/macOS/Windows)
+│   │   └── notification_service.dart          # Desktop notifications (local_notifier)
 │   │
 │   ├── models/                                # Data models
 │   │   ├── device.dart                        # Device info + PairingState enum
@@ -760,20 +867,24 @@ copy-paste/
 │   │   ├── device_provider.dart               # Desktop + mobile device list
 │   │   ├── clipboard_provider.dart            # Clipboard history (max 50 items)
 │   │   ├── transfer_provider.dart             # File transfer progress tracking
-│   │   └── web_client_provider.dart           # Connected web clients
+│   │   ├── web_client_provider.dart           # Connected web clients
+│   │   └── theme_provider.dart                # ThemeMode (Light/System/Dark) + SharedPrefs
 │   │
 │   ├── screens/                               # Desktop UI
-│   │   └── home/
-│   │       ├── home_screen.dart               # 3 tabs: Devices, Clipboard, Files
-│   │       └── widgets/
-│   │           ├── device_list.dart           # Device list + "Connect" FAB
-│   │           ├── device_tile.dart           # Device with pairing state dot
-│   │           ├── clipboard_history.dart     # Clipboard history list
-│   │           ├── transfer_list.dart         # Transfer progress with bars
-│   │           ├── connect_dialog.dart        # IP + port input
-│   │           ├── pin_dialog.dart            # PIN display (responder) +
-│   │           │                              #   PIN input (initiator)
-│   │           └── qr_code_panel.dart         # QR code for mobile connection
+│   │   ├── home/
+│   │   │   ├── home_screen.dart               # 3 tabs: Devices, Clipboard, Files
+│   │   │   └── widgets/
+│   │   │       ├── device_list.dart           # Device list + "Connect" FAB
+│   │   │       ├── device_tile.dart           # Device with pairing state dot
+│   │   │       ├── clipboard_history.dart     # Clipboard history list
+│   │   │       ├── transfer_list.dart         # Transfer progress with bars
+│   │   │       ├── connect_dialog.dart        # IP + port input
+│   │   │       ├── pin_dialog.dart            # PIN display (responder) +
+│   │   │       │                              #   PIN input (initiator)
+│   │   │       └── qr_code_panel.dart         # QR code for mobile connection
+│   │   └── settings/
+│   │       └── settings_screen.dart           # Settings: device info, theme, paired
+│   │                                          #   devices, web sessions, data
 │   │
 │   └── utils/
 │       ├── constants.dart                     # Protocol version, ports, timeouts
@@ -792,16 +903,22 @@ copy-paste/
 │   │   ├── clipboard.js                       # Clipboard read/write operations
 │   │   ├── transfer.js                        # File upload (XHR) + download
 │   │   └── ui.js                              # DOM updates + PIN overlay
+│   ├── sw.js                                  # Service worker (PWA installability)
 │   └── assets/
-│       └── manifest.json                      # PWA manifest
+│       ├── manifest.json                      # PWA manifest (icons, display, theme)
+│       ├── icon-192.png                       # PWA icon 192x192
+│       └── icon-512.png                       # PWA icon 512x512
 │
 ├── scripts/                                   # Build & packaging scripts
 │   ├── build-deb.sh                           # Linux .deb package builder
-│   └── build-dmg.sh                           # macOS .dmg package builder
+│   ├── build-dmg.sh                           # macOS .dmg package builder
+│   ├── build-windows.ps1                      # Windows .zip + installer builder
+│   └── installer.iss                          # Inno Setup script (Windows .exe)
 │
 ├── docs/
 │   ├── ARCHITECTURE.md                        # This file
-│   └── DEVELOPMENT-PHASES.md                  # Development roadmap & progress
+│   ├── DEVELOPMENT-PHASES.md                  # Development roadmap & progress
+│   └── WINDOWS-BUILD-GUIDE.md                 # Windows build prerequisites & steps
 │
 ├── pubspec.yaml                               # Flutter dependencies
 ├── LICENSE                                    # MIT License
@@ -826,8 +943,10 @@ copy-paste/
 | `uuid` | Generate unique IDs |
 | `freezed` | Immutable data classes |
 | `json_serializable` | JSON serialization |
-| `local_notifier` | Desktop notifications |
-| `window_manager` | Window control |
+| `local_notifier` | Desktop notifications (Linux/macOS/Windows) |
+| `tray_manager` | System tray / menu bar icon (Linux/macOS/Windows) |
+| `window_manager` | Window control (show/hide/prevent-close) |
+| `package_info_plus` | Read app version from pubspec.yaml at runtime |
 | `shelf` | HTTP server framework |
 | `shelf_web_socket` | WebSocket support untuk shelf |
 
@@ -842,7 +961,8 @@ copy-paste/
 | WebSocket API | Native browser WebSocket + auto-reconnect |
 | File API | `<input type="file">` + XHR upload with progress |
 | localStorage | Session token caching (`cp_session_token`) |
-| PWA | `manifest.json` (add-to-homescreen support) |
+| Service Worker | `sw.js` — network-first strategy, enables PWA install prompt |
+| PWA | `manifest.json` + icons — installable via Add to Home Screen (Android/iOS) |
 
 **Web client modules:**
 | File | Fungsi |
@@ -864,12 +984,13 @@ copy-paste/
 
 | Threat | Mitigasi |
 |--------|----------|
-| Eavesdropping (sniffing LAN) | Desktop↔Desktop: AES-256-GCM. Desktop↔Mobile: TLS (HTTPS) |
-| Man-in-the-Middle | Desktop pairing: PIN verification. Mobile: QR code token |
-| Unauthorized device | Desktop: explicit pairing. Mobile: one-time QR token + session |
-| Replay attack | Unique nonce per message (TCP), session token expiry (Web) |
-| Clipboard data leakage | Data hanya lokal, auto-expire history, no cloud |
-| Rogue web client | Token-based auth, session invalidation, configurable auto-expire |
+| Eavesdropping (sniffing LAN) | Desktop↔Desktop: HMAC-SHA256 auth. Desktop↔Mobile: self-signed TLS (HTTPS + WSS) |
+| Man-in-the-Middle | Desktop pairing: PIN + HMAC verification. Mobile: QR code URL + PIN |
+| Unauthorized device | Desktop: explicit PIN pairing + persistent session key. Mobile: PIN + session token |
+| Replay attack | Unique nonce per pairing (TCP), session token expiry 24h (Web) |
+| Clipboard data leakage | Data hanya lokal, in-memory history (hilang saat restart), no cloud |
+| Rogue web client | PIN auth + session token, revoke per-session dari Settings, auto-expire 24h |
+| Key leakage | Session key disimpan di Keychain (macOS) / libsecret (Linux) / DPAPI (Windows) |
 
 ### Authentication Flow
 

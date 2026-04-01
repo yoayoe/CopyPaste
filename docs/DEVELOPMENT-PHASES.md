@@ -151,9 +151,9 @@
 | Phase 3.5: macOS Build & Test | **Complete** (mDNS test deferred) | ~95% |
 | Phase 4: File Transfer | **Complete** | 100% |
 | Phase 5: Security | Auth + session mgmt + key storage + auto-reconnect done, encryption deferred | ~80% |
-| Phase 6: Polish & UX | Theme done, rest pending | ~15% |
-| Phase 7: v1 Release | Packaging (Linux/macOS/Windows) & docs done, tests/CI pending | ~70% |
-| v2: Windows Support | Build, clipboard sync, file transfer, packaging done | ~80% |
+| Phase 6: Polish & UX | Notifications, tray, settings, theme, PWA done — multi-file pending | ~90% |
+| Phase 7: v1 Release | Packaging & docs done, tests/CI pending, v0.5.0 released | ~80% |
+| v2: Windows Support | **Complete** — clipboard, file transfer, tray, packaging | 100% |
 
 ---
 
