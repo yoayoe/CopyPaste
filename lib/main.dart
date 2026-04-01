@@ -59,12 +59,11 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener
   }
 
   @override
-  void onWindowClose() async {
+  void onWindowClose() {
     // Hide to tray instead of quitting.
-    final isPreventClose = await windowManager.isPreventClose();
-    if (isPreventClose) {
-      await windowManager.hide();
-    }
+    // Must be synchronous — awaiting isPreventClose() causes the native
+    // close to complete before hide() is called on macOS.
+    windowManager.hide();
   }
 
   Future<String> _extractWebClient() async {
