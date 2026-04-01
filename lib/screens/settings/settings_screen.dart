@@ -5,6 +5,7 @@ import '../../main.dart';
 import '../../models/session_info.dart';
 import '../../providers/clipboard_provider.dart';
 import '../../providers/transfer_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/secure_storage_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -142,6 +143,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 _infoTile('Local IP', appService.localIp),
                 _infoTile('TCP Port', '${appService.tcpPort}'),
                 _infoTile('Web URL', appService.webUrl, copyable: true),
+
+                const Divider(),
+
+                // ── Appearance ───────────────────────────────────────
+                _sectionHeader('Appearance'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(
+                        value: ThemeMode.light,
+                        icon: Icon(Icons.light_mode),
+                        label: Text('Light'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.system,
+                        icon: Icon(Icons.brightness_auto),
+                        label: Text('System'),
+                      ),
+                      ButtonSegment(
+                        value: ThemeMode.dark,
+                        icon: Icon(Icons.dark_mode),
+                        label: Text('Dark'),
+                      ),
+                    ],
+                    selected: {ref.watch(themeModeProvider)},
+                    onSelectionChanged: (modes) =>
+                        ref.read(themeModeProvider.notifier).set(modes.first),
+                  ),
+                ),
 
                 const Divider(),
 

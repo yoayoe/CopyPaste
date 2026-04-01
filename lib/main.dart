@@ -8,6 +8,7 @@ import 'services/app_service.dart';
 import 'services/notification_service.dart';
 import 'services/tray_service.dart';
 import 'screens/home/home_screen.dart';
+import 'providers/theme_provider.dart';
 
 /// Global AppService provider.
 final appServiceProvider = Provider<AppService>((ref) => AppService());
@@ -113,6 +114,7 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       title: 'CopyPaste',
       debugShowCheckedModeBanner: false,
@@ -126,7 +128,7 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener
         brightness: Brightness.dark,
         useMaterial3: true,
       ),
-      themeMode: ThemeMode.system,
+      themeMode: themeMode,
       home: const HomeScreen(),
     );
   }

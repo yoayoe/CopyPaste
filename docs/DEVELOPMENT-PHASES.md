@@ -113,9 +113,9 @@
 - [ ] ~~Image clipboard support~~ — deferred (gunakan file transfer untuk kirim gambar)
 - [x] Desktop notifications ✅
 - [x] System tray (Linux) / menu bar (macOS) — minimize to background ✅
-- [ ] Web client PWA support (add to homescreen)
+- [x] Web client PWA support (add to homescreen) ✅
 - [x] Dark/light theme (web client) ✅
-- [ ] Dark/light theme (desktop — sudah pakai ThemeMode.system)
+- [x] Dark/light theme (desktop — toggle Light/System/Dark di Settings) ✅
 - [x] Settings UI ✅
 - [ ] Multi-file transfer
 
