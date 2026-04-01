@@ -22,7 +22,10 @@ class TrayService with TrayListener {
       await trayManager.setIcon('assets/icons/app_icon.png');
     }
 
-    await trayManager.setToolTip('CopyPaste');
+    // setToolTip is not supported on Linux.
+    if (!Platform.isLinux) {
+      await trayManager.setToolTip('CopyPaste');
+    }
     await _buildMenu();
     Log.d(_tag, 'Tray initialized');
   }
