@@ -114,7 +114,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE
-Depends: libgtk-3-0, libnotify4
+Depends: libgtk-3-0, libnotify4, libayatana-appindicator3-1
 Maintainer: $MAINTAINER
 Description: $APP_DESCRIPTION
  CopyPaste is an open-source, self-hosted clipboard sharing and file
