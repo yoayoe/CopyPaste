@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.1 - 2026-06-02
+
+### Bug Fixes
+
+- **Safari iOS false "Connected" status** — Safari aggressively caches GET `/api/poll` responses, causing the web client to always display "Connected" even when the desktop app is unreachable. Fixed by adding `Cache-Control: no-cache, no-store, must-revalidate` headers to all HTTP responses and `cache: 'no-cache'` on client fetch calls.
+- **Service worker caching stale JS** — PWA service worker previously cached JS files, causing users to run old code after page refresh. JS files are now fetched live from the server.
+- **Polling connection state** — Added proper polling fail count tracking (`pollingFailCount`), auth state management (`_pollingAuthenticated`), and a 5-second fetch timeout in `pollMessages()` to correctly detect disconnections in polling mode.
+
+### Improvements
+
+- Web client now correctly shows "Disconnected" in polling mode when the server is unreachable (previously guarded by `WS.isPolling()` check).
+
 ## v0.5.0 - 2026-04-01
 
 ### New Features
