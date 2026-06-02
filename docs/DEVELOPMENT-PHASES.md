@@ -154,6 +154,7 @@
 | Phase 6: Polish & UX | Notifications, tray, settings, theme, PWA done — multi-file pending | ~90% |
 | Phase 7: v1 Release | Packaging & docs done, tests/CI pending, v0.5.0 released | ~80% |
 | v2: Windows Support | **Complete** — clipboard, file transfer, tray, packaging | 100% |
+| v3: Android (Beta) | Pairing, clipboard send/receive, packaging done — foreground service & native listener pending | ~60% |
 
 ---
 
@@ -163,6 +164,9 @@
 |-------|--------|----------|
 | Linux mDNS | `nsd` plugin tidak support Linux desktop. Workaround: manual IP connection | Medium |
 | Clipboard polling | Menggunakan polling 500ms, bukan native listener per-platform | Low |
+| Android background drop | Tanpa foreground service, Android men-suspend socket saat background/layar mati. Workaround: heartbeat + auto-reconnect saat app dibuka | Medium |
+| Android clipboard send | Manual "Read & Send" (OS blokir baca background sejak Android 10), belum native listener | Medium |
+| Android APK signing | Debug-signed, perlu release keystore sebelum Play Store | Low |
 | Flutter snap | Tidak bisa dipakai karena AppArmor. Harus manual install | Info |
 | ~~Key persistence~~ | ~~Solved~~ — session key di-persist via macOS Keychain / Linux libsecret, auto-reconnect on restart | Done |
 | ~~Desktop ↔ Desktop sync~~ | ~~Solved~~ — PIN-based pairing + HMAC + persistent TCP | Done |
@@ -194,11 +198,32 @@
 
 ---
 
-### v3 — Native Mobile App (Future)
+### v3 — Native Mobile App (🚧 Android Beta)
 
-- [ ] Flutter mobile app (Android + iOS)
-- [ ] Native clipboard monitoring (Android: `ClipboardManager`, iOS: `UIPasteboard`)
+#### Android (Beta)
+- [x] Flutter Android build target (`android/` Gradle host) ✅
+- [x] Fix launch crash — `MainActivity` package mismatch (`com.example.copypaste` → `com.copypaste.app`) ✅
+- [x] Fix build — force `compileSdk 36` on app + all plugins (`file_picker` → `flutter_plugin_android_lifecycle` requires 36) ✅
+- [x] Guard desktop-only services (`window_manager`, tray, notifications) behind `Platform.isAndroid` check ✅
+- [x] Pair with desktops over TCP (PIN + HMAC), reuse full `AppService` ✅
+- [x] Clipboard **receive** — auto write to system clipboard + show in history ✅
+- [x] Clipboard **send** — manual "Read & Send" button (OS blocks background polling since Android 10) ✅
+- [x] Packaging: `.apk` builder (`scripts/build-apk.sh`, versioned output) ✅
+- [ ] Foreground service to keep TCP connection alive while backgrounded / screen off
+- [ ] Native clipboard listener (`ClipboardManager`) — currently manual send only
+- [ ] Release keystore signing (currently debug-signed)
+- [ ] Play Store distribution
+
+**Catatan v3 Android:**
+- Android (10+) menolak baca clipboard saat app tidak fokus → polling 500ms dimatikan di Android, diganti tombol manual **Read & Send** di tab Clipboard
+- App menjalankan `AppService` penuh (TCP server + web server) seperti desktop — bertindak sebagai hub, pairing via manual IP
+- **Connection resilience** (cross-platform): heartbeat PING/PONG tiap 15s + auto-reconnect saat koneksi putus mendadak
+- Keterbatasan: koneksi paling stabil saat app foreground; background/layar-mati lama bisa drop sampai app dibuka lagi (butuh foreground service)
+
+#### iOS (Planned)
+- [ ] Flutter iOS build target
+- [ ] Native clipboard monitoring (`UIPasteboard`)
 - [ ] mDNS discovery dari mobile (langsung P2P, tanpa web server)
-- [ ] Background service (Android Foreground Service, iOS Background App Refresh)
+- [ ] Background App Refresh
 - [ ] Push notifications
-- [ ] App Store / Play Store distribution
+- [ ] App Store distribution

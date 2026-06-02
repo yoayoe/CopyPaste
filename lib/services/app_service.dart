@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../core/discovery/discovery_service.dart';
@@ -99,7 +100,7 @@ class AppService {
     final prefs = await SharedPreferences.getInstance();
     _deviceId = prefs.getString('device_id') ?? const Uuid().v4();
     await prefs.setString('device_id', _deviceId);
-    _deviceName = Platform.localHostname;
+    _deviceName = await _resolveDeviceName();
 
     // Initialize secure storage.
     secureStorage = SecureStorageService();
@@ -278,6 +279,32 @@ class AppService {
     Future.delayed(const Duration(seconds: 3), () {
       pairingService.reconnectToKnownPeers();
     });
+
+    // 8. Start heartbeat to keep idle connections alive + detect dead sockets.
+    pairingService.startHeartbeat();
+  }
+
+  /// Resolve a human-friendly device name. On Android `Platform.localHostname`
+  /// returns "localhost", so use the manufacturer + model instead (e.g.
+  /// "samsung SM-A546E"). Desktop platforms use the system hostname.
+  Future<String> _resolveDeviceName() async {
+    try {
+      if (Platform.isAndroid) {
+        final info = await DeviceInfoPlugin().androidInfo;
+        final manufacturer = info.manufacturer.trim();
+        final model = info.model.trim();
+        // Avoid "samsung samsung SM-..." when model already includes the brand.
+        final name = model.toLowerCase().startsWith(manufacturer.toLowerCase())
+            ? model
+            : '$manufacturer $model'.trim();
+        if (name.isNotEmpty) {
+          return name[0].toUpperCase() + name.substring(1);
+        }
+      }
+    } catch (e) {
+      Log.w(_tag, 'Failed to resolve device name: $e');
+    }
+    return Platform.localHostname;
   }
 
   void _wirePairingCallbacks() {
@@ -459,7 +486,21 @@ class AppService {
       return;
     }
     Log.d(_tag, 'Clipboard changed: ${content.length} chars');
+    _dispatchLocalClipboard(content);
+  }
 
+  /// Manually send clipboard text to all paired desktops + web clients.
+  ///
+  /// Used on Android where the OS blocks background clipboard polling, so the
+  /// user triggers sending explicitly while the app is in focus.
+  void sendClipboard(String content) {
+    if (content.isEmpty) return;
+    Log.d(_tag, 'Clipboard sent manually: ${content.length} chars');
+    _dispatchLocalClipboard(content);
+  }
+
+  /// Shared logic for distributing locally-originated clipboard content.
+  void _dispatchLocalClipboard(String content) {
     final item = {
       'id': const Uuid().v4(),
       'type': 'text',

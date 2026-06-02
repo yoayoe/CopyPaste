@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/services.dart';
 import '../utils/constants.dart';
 import '../utils/logger.dart';
@@ -18,7 +19,16 @@ class ClipboardService {
   ClipboardService({this.onClipboardChanged});
 
   /// Start polling the clipboard for changes.
+  ///
+  /// Disabled on Android: since Android 10 the OS denies clipboard reads
+  /// unless the app is in focus, so background polling just spams access-denied
+  /// errors and wastes battery. Android sends clipboard manually instead
+  /// (via the "Read Clipboard & Send" button while the app is focused).
   void startMonitoring() {
+    if (Platform.isAndroid) {
+      Log.i(_tag, 'Auto-monitoring disabled on Android (OS clipboard restriction)');
+      return;
+    }
     _pollTimer = Timer.periodic(kClipboardPollInterval, (_) => _poll());
     Log.i(_tag, 'Monitoring started');
   }

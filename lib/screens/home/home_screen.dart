@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../main.dart';
@@ -195,13 +197,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           TransferList(transfers: transfers),
         ],
       ),
-      floatingActionButton: _selectedTab == 2 && ready
-          ? FloatingActionButton(
-              onPressed: () => _pickAndSendFile(context),
-              tooltip: 'Send file',
-              child: const Icon(Icons.attach_file),
-            )
-          : null,
+      floatingActionButton: _buildFab(ready),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedTab,
         onDestinationSelected: (index) {
@@ -221,6 +217,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             label: 'Files (${transfers.length})',
           ),
         ],
+      ),
+    );
+  }
+
+  Widget? _buildFab(bool ready) {
+    if (!ready) return null;
+
+    // Files tab: pick & send a file.
+    if (_selectedTab == 2) {
+      return FloatingActionButton(
+        onPressed: () => _pickAndSendFile(context),
+        tooltip: 'Send file',
+        child: const Icon(Icons.attach_file),
+      );
+    }
+
+    // Clipboard tab on Android: manual send (auto-poll is blocked by the OS).
+    if (_selectedTab == 1 && Platform.isAndroid) {
+      return FloatingActionButton.extended(
+        onPressed: _readClipboardAndSend,
+        tooltip: 'Read clipboard and send to paired devices',
+        icon: const Icon(Icons.send),
+        label: const Text('Read & Send'),
+      );
+    }
+
+    return null;
+  }
+
+  /// Read the system clipboard (succeeds because the app is focused) and send
+  /// it to all paired desktops + web clients. Android-only manual send path.
+  Future<void> _readClipboardAndSend() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final content = data?.text ?? '';
+
+    if (!mounted) return;
+
+    if (content.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Clipboard is empty')),
+      );
+      return;
+    }
+
+    final appService = ref.read(appServiceProvider);
+    appService.sendClipboard(content);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Sent: ${content.length > 40 ? '${content.substring(0, 40)}…' : content}'),
+        duration: const Duration(seconds: 1),
       ),
     );
   }

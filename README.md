@@ -10,12 +10,15 @@ Download the latest version from the [Releases](https://github.com/yoayoe/CopyPa
 
 | Platform | File | Type |
 |----------|------|------|
-| Linux | `copypaste_x.x.x_amd64.deb` | Debian package |
+| Linux | `CopyPaste_x.x.x_amd64.deb` | Debian package |
 | macOS | `CopyPaste_x.x.x.dmg` | Disk image |
 | Windows | `CopyPaste_x.x.x_Windows_Setup.exe` | Installer |
 | Windows | `CopyPaste_x.x.x_Windows.zip` | Portable (no install) |
+| Android | `CopyPaste_x.x.x_Android.apk` | Native app (sideload) |
 
 > **Windows users**: Choose the **Setup.exe** for a standard installation, or the **ZIP** for a portable version you can run from any folder without installing.
+>
+> **Android users**: The `.apk` is a native app (sideload — enable "Install unknown apps"). You can still use any device via the browser-based web client (scan the QR code) without installing anything.
 
 ## How It Works
 
@@ -62,8 +65,11 @@ Desktop A (Flutter)    TCP (P2P)    Desktop B (Flutter)
 | Linux | Desktop app (Flutter) | Active |
 | macOS | Desktop app (Flutter) | Active |
 | Windows | Desktop app (Flutter) | Active |
+| Android | Native app (Flutter) | Beta |
 | Android | Web client (Browser) | Active |
 | iOS | Web client (Browser) | Active |
+
+> **Android native app (Beta):** Pairs with desktops over TCP like another desktop. Because Android (10+) blocks background clipboard reads, sending is manual — copy text, open CopyPaste → **Clipboard** tab → tap **Read & Send**. Receiving is automatic (written to the clipboard + shown in history). Note: the connection survives best while the app is in the foreground; long background/screen-off may drop it until reopened.
 
 ## Prerequisites
 
@@ -109,6 +115,20 @@ flutter doctor
 
 > See [docs/WINDOWS-BUILD-GUIDE.md](docs/WINDOWS-BUILD-GUIDE.md) for detailed Windows setup guide.
 
+### Android
+
+```bash
+# Flutter SDK (same as above) + Android toolchain:
+#   - Android SDK (compileSdk 36) — install via Android Studio or sdkmanager
+#   - JDK 17+ (set JAVA_HOME)
+# Set environment:
+export ANDROID_HOME="$HOME/Android"   # adjust to your SDK location
+export JAVA_HOME="/path/to/jdk-17"
+
+# Verify
+flutter doctor
+```
+
 ## Getting Started
 
 ### 1. Clone the repository
@@ -135,6 +155,9 @@ flutter run -d macos
 
 # Windows
 flutter run -d windows
+
+# Android (device connected via USB / adb)
+flutter run -d android
 ```
 
 ### 4. Connect mobile device
@@ -231,6 +254,23 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 
 > See [docs/WINDOWS-BUILD-GUIDE.md](docs/WINDOWS-BUILD-GUIDE.md) for detailed setup and Inno Setup configuration.
 
+### Android
+
+```bash
+# Build a release APK (auto-reads version from pubspec.yaml)
+chmod +x scripts/build-apk.sh
+./scripts/build-apk.sh
+
+# Output: build/CopyPaste_0.5.1_Android.apk
+
+# Install on a connected device
+adb install -r build/CopyPaste_0.5.1_Android.apk
+```
+
+> The script auto-detects `JAVA_HOME` and `ANDROID_HOME` (or set them yourself).
+> The release APK is signed with the **debug keystore** — fine for sideloading/testing,
+> but set up a release keystore before publishing to the Play Store.
+
 ## Project Structure
 
 ```
@@ -289,10 +329,14 @@ copy-paste/
 │   │   ├── transfer.js           # File upload/download via HTTP
 │   │   └── ui.js                 # DOM manipulation + PIN overlay
 │   └── assets/manifest.json      # PWA manifest
+├── android/                      # Android native app (Gradle/Kotlin host)
+│   ├── app/build.gradle.kts      # App module (compileSdk 36, applicationId)
+│   └── build.gradle.kts          # Root — forces plugin compileSdk to 36
 ├── scripts/
 │   ├── build-deb.sh              # Linux .deb package builder
 │   ├── build-dmg.sh              # macOS .dmg package builder
 │   ├── build-windows.ps1         # Windows installer + ZIP builder
+│   ├── build-apk.sh              # Android .apk builder
 │   └── installer.iss             # Inno Setup script for .exe installer
 ├── docs/
 │   ├── ARCHITECTURE.md           # Full architecture documentation
@@ -328,9 +372,10 @@ See [docs/DEVELOPMENT-PHASES.md](docs/DEVELOPMENT-PHASES.md) for development pro
 | Security (Desktop) | PIN-based pairing + HMAC-SHA256 + HKDF session keys |
 | Security (Mobile) | 6-digit PIN verification + session token caching |
 | File transfer | Chunked TCP (64KB) + HTTP multipart + SHA-256 checksum |
-| Device discovery | mDNS/DNS-SD via `nsd` (macOS), manual IP (Linux/Windows) |
+| Device discovery | mDNS/DNS-SD via `nsd` (macOS), manual IP (Linux/Windows/Android) |
 | Web client | Vanilla HTML/CSS/JS (< 50KB, no framework) |
-| Packaging | .deb (Linux), .dmg (macOS), .exe installer + .zip (Windows) |
+| Connection resilience | 15s heartbeat (PING/PONG) + auto-reconnect on unexpected drops |
+| Packaging | .deb (Linux), .dmg (macOS), .exe installer + .zip (Windows), .apk (Android) |
 
 ### Running Tests
 

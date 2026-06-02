@@ -12,7 +12,14 @@
       "Bash(/home/yoayoe/flutter/bin/flutter run:*)",
       "Bash(/home/yoayoe/flutter/bin/flutter pub:*)",
       "Bash(sudo apt-get:*)",
-      "Bash(/home/yoayoe/flutter/bin/dart analyze:*)"
+      "Bash(/home/yoayoe/flutter/bin/dart analyze:*)",
+      "Bash(rtk ls *)",
+      "Bash(rtk read *)",
+      "Bash(rtk grep *)",
+      "Bash(dpkg -l)",
+      "Bash(apt list *)",
+      "Bash(rtk git *)",
+      "Bash(/home/yoayoe/Android/platform-tools/adb install *)"
     ]
   }
 }

@@ -13,7 +13,8 @@ CopyPaste menggunakan **arsitektur hybrid** dengan dua tipe client:
 | **Desktop App** | macOS, Linux | Flutter | Full-featured: auto clipboard sync, background service, file transfer, mDNS discovery, **embedded web server**, system tray | **v1 ✅** |
 | **Web Client** | Android, iOS (any mobile browser) | HTML/CSS/JS (SPA) | Manual clipboard (browser limitation), file transfer, **no install required**, PWA installable | **v1 ✅** |
 | **Desktop App** | Windows | Flutter | Same as macOS/Linux | **v2 ✅** |
-| **Mobile App** | Android, iOS | Flutter | Full-featured native mobile app dengan auto clipboard sync | **v3 (Future)** |
+| **Native App** | Android | Flutter | Pairs over TCP like a desktop. Manual clipboard send (OS blocks background polling), auto receive | **v3 🚧 Beta** |
+| **Mobile App** | iOS | Flutter | Full-featured native mobile app dengan auto clipboard sync | **v3 (Future)** |
 
 Mobile device cukup **scan QR code** dari desktop app → buka browser → langsung pakai.
 
@@ -23,7 +24,7 @@ Mobile device cukup **scan QR code** dari desktop app → buka browser → langs
 |-------|-------|-----------|--------|
 | **v1** | macOS + Linux + Web Client | Desktop app untuk macOS & Linux dengan embedded web server. Mobile akses via browser. | ✅ Released |
 | **v2** | + Windows | Tambah Windows desktop support, system tray, settings UI, notifications. | ✅ Released |
-| **v3** | + Mobile Native App | Flutter mobile app (Android/iOS) untuk full-featured experience di mobile. | Planned |
+| **v3** | + Mobile Native App | Flutter mobile app (Android/iOS) untuk full-featured experience di mobile. | 🚧 Android Beta, iOS Planned |
 
 ### Prinsip Desain
 
@@ -146,6 +147,7 @@ Dua channel komunikasi terpisah:
 │  │  - PeerConnection: persistent TCP with message framing  │  │
 │  │  - PIN-based pairing + HMAC-SHA256 authentication       │  │
 │  │  - Auto clipboard sync + chunked file transfer (64KB)   │  │
+│  │  - 15s heartbeat (PING/PONG) + auto-reconnect on drop   │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐  │
@@ -486,6 +488,16 @@ Auto-monitor clipboard. Hanya berjalan di desktop app.
 | macOS    | `NSPasteboard` + polling (500ms) | ✅ |
 | Linux    | `X11/Wayland clipboard` + polling (500ms) | ✅ |
 | Windows  | Flutter Clipboard API + polling (500ms) | ✅ |
+| Android  | **Polling disabled** — manual "Read & Send"; auto write on receive | 🚧 Beta |
+
+**Android clipboard note:** Since Android 10, the OS denies clipboard reads to apps
+that are not in focus, so background polling is impossible (and just spams
+access-denied errors). On Android:
+- **Send** — user taps **Read & Send** on the Clipboard tab while the app is focused;
+  the read succeeds because the app holds focus, then content is dispatched to peers
+  via `AppService.sendClipboard()`.
+- **Receive** — incoming clipboard from a peer is written to the system clipboard
+  (`Clipboard.setData`) and added to history (tap to re-copy).
 
 ---
 
@@ -848,9 +860,11 @@ copy-paste/
 │   │
 │   ├── services/                              # Business logic
 │   │   ├── app_service.dart                   # Main orchestrator — wires everything
-│   │   ├── clipboard_service.dart             # Clipboard monitor (500ms polling)
+│   │   ├── clipboard_service.dart             # Clipboard monitor (500ms polling;
+│   │   │                                      #   disabled on Android — manual send)
 │   │   ├── pairing_service.dart               # PIN-based pairing + HMAC-SHA256
 │   │   │                                      #   + HKDF session key derivation
+│   │   │                                      #   + 15s heartbeat + auto-reconnect on drop
 │   │   ├── file_transfer_service.dart         # Chunked file transfer (64KB)
 │   │   │                                      #   + SHA-256 checksum verification
 │   │   ├── secure_storage_service.dart        # Encrypted storage (Keychain/libsecret/DPAPI)
@@ -909,10 +923,15 @@ copy-paste/
 │       ├── icon-192.png                       # PWA icon 192x192
 │       └── icon-512.png                       # PWA icon 512x512
 │
+├── android/                                   # Android native app (Gradle/Kotlin host)
+│   ├── app/build.gradle.kts                   # App module — compileSdk 36, applicationId
+│   └── build.gradle.kts                       # Root — forces all plugins to compileSdk 36
+│
 ├── scripts/                                   # Build & packaging scripts
 │   ├── build-deb.sh                           # Linux .deb package builder
 │   ├── build-dmg.sh                           # macOS .dmg package builder
 │   ├── build-windows.ps1                      # Windows .zip + installer builder
+│   ├── build-apk.sh                           # Android .apk builder (versioned output)
 │   └── installer.iss                          # Inno Setup script (Windows .exe)
 │
 ├── docs/
