@@ -10,34 +10,33 @@ import 'services/tray_service.dart';
 import 'screens/home/home_screen.dart';
 import 'providers/theme_provider.dart';
 
-/// Global AppService provider.
 final appServiceProvider = Provider<AppService>((ref) => AppService());
 
-/// Tracks whether services have started.
 final servicesReadyProvider = StateProvider<bool>((ref) => false);
 
-/// Holds startup error message if services failed to start.
 final startupErrorProvider = StateProvider<String?>((ref) => null);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await windowManager.ensureInitialized();
-  await NotificationService.setup();
-  await TrayService.instance.setup();
+  if (!Platform.isAndroid) {
+    await windowManager.ensureInitialized();
+    await NotificationService.setup();
+    await TrayService.instance.setup();
 
-  const windowOptions = WindowOptions(
-    size: Size(420, 700),
-    minimumSize: Size(380, 500),
-    center: true,
-    title: 'CopyPaste',
-    titleBarStyle: TitleBarStyle.normal,
-  );
+    const windowOptions = WindowOptions(
+      size: Size(420, 700),
+      minimumSize: Size(380, 500),
+      center: true,
+      title: 'CopyPaste',
+      titleBarStyle: TitleBarStyle.normal,
+    );
 
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(const ProviderScope(child: CopyPasteApp()));
 }
@@ -50,21 +49,23 @@ class CopyPasteApp extends ConsumerStatefulWidget {
 }
 
 class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener {
+  final _isDesktop = !Platform.isAndroid;
+
   @override
   void initState() {
     super.initState();
-    windowManager.addListener(this);
-    // Set prevent-close here so the listener is guaranteed to be registered first.
-    windowManager.setPreventClose(true);
+    if (_isDesktop) {
+      windowManager.addListener(this);
+      windowManager.setPreventClose(true);
+    }
     _startServices();
   }
 
   @override
   void onWindowClose() {
-    // Hide to tray instead of quitting.
-    // Must be synchronous — awaiting isPreventClose() causes the native
-    // close to complete before hide() is called on macOS.
-    windowManager.hide();
+    if (_isDesktop) {
+      windowManager.hide();
+    }
   }
 
   Future<String> _extractWebClient() async {
@@ -106,8 +107,10 @@ class _CopyPasteAppState extends ConsumerState<CopyPasteApp> with WindowListener
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
-    TrayService.instance.dispose();
+    if (_isDesktop) {
+      windowManager.removeListener(this);
+      TrayService.instance.dispose();
+    }
     ref.read(appServiceProvider).stop();
     super.dispose();
   }

@@ -90,6 +90,8 @@ class _TransferTile extends StatelessWidget {
       Process.run('open', ['-R', path]);
     } else if (Platform.isLinux) {
       Process.run('xdg-open', [dir]);
+    } else {
+      return;
     }
 
     ScaffoldMessenger.of(context).showSnackBar(

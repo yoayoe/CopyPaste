@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -37,6 +38,17 @@ class PairingService {
   /// Pending outgoing pair — waiting for PIN input.
   PeerConnection? _pendingOutgoing;
   String? _pendingOutgoingNonce;
+
+  /// Periodic heartbeat that keeps idle TCP connections alive (NAT/router drop
+  /// idle sockets) and surfaces dead connections quickly.
+  Timer? _heartbeatTimer;
+
+  /// Device IDs that were intentionally disconnected (unpaired / app shutdown),
+  /// so [_handleDisconnected] does not auto-reconnect them.
+  final Set<String> _intentionalDisconnects = {};
+
+  /// True once the service is shutting down — suppresses all auto-reconnects.
+  bool _shuttingDown = false;
 
   // --- Callbacks ---
 
@@ -81,6 +93,24 @@ class PairingService {
   List<PeerConnection> get peers => _peers.values.toList();
 
   bool hasPeer(String deviceId) => _peers.containsKey(deviceId);
+
+  /// Start sending periodic PINGs to all paired peers. Keeps idle connections
+  /// alive and lets a dead socket fail fast (triggering auto-reconnect).
+  void startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      for (final peer in _peers.values.toList()) {
+        if (peer.state == PeerState.paired) {
+          peer.send(Message.ping(localDeviceId));
+        }
+      }
+    });
+  }
+
+  void stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
 
   /// Handle incoming TCP connection from the server.
   /// Called when a new socket connects to our TCP server.
@@ -187,6 +217,7 @@ class PairingService {
 
   /// Disconnect and unpair a specific peer.
   Future<void> disconnectPeer(String deviceId) async {
+    _intentionalDisconnects.add(deviceId);
     final peer = _peers.remove(deviceId);
     if (peer != null) {
       await peer.close();
@@ -198,6 +229,8 @@ class PairingService {
 
   /// Disconnect all peers.
   Future<void> disconnectAll() async {
+    _shuttingDown = true;
+    stopHeartbeat();
     for (final peer in _peers.values.toList()) {
       await peer.close();
     }
@@ -447,6 +480,13 @@ class PairingService {
     if (deviceId != null) {
       _peers.remove(deviceId);
       onPeerDisconnected?.call(deviceId);
+
+      // Auto-reconnect on unexpected drops (idle timeout, Wi-Fi blip, Android
+      // backgrounding the socket). Skip if the disconnect was intentional.
+      final intentional = _intentionalDisconnects.remove(deviceId);
+      if (!intentional && !_shuttingDown) {
+        _scheduleAutoReconnect(deviceId);
+      }
     }
 
     // Clean up pending reconnects.
@@ -464,6 +504,22 @@ class PairingService {
       _pendingOutgoing = null;
       _pendingOutgoingNonce = null;
     }
+  }
+
+  /// Reconnect to a peer that dropped unexpectedly, using its stored session key.
+  Future<void> _scheduleAutoReconnect(String deviceId) async {
+    if (secureStorage == null || _shuttingDown) return;
+
+    // Brief delay so the socket fully tears down and the remote can recover.
+    await Future.delayed(const Duration(seconds: 2));
+    if (_shuttingDown || _peers.containsKey(deviceId)) return;
+
+    final known = await secureStorage!.loadAllPairedPeers();
+    final entry = known[deviceId];
+    if (entry == null) return; // Unpaired in the meantime — don't reconnect.
+
+    Log.i(_tag, 'Auto-reconnecting to dropped peer ${entry.$1.deviceName}');
+    _attemptReconnectWithRetry(entry.$1, entry.$2);
   }
 
   // --- Reconnect logic ---
