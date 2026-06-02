@@ -11,6 +11,8 @@ const WS = (() => {
   let reconnectAttempts = 0;
   let pollInterval = null;
   let usePolling = false;
+  let pollingFailCount = 0;
+  let _pollingAuthenticated = false;
   const POLL_INTERVAL_MS = 1500;
   const listeners = {};
 
@@ -107,15 +109,16 @@ const WS = (() => {
   function startPolling() {
     if (usePolling) return;
     usePolling = true;
+    pollingFailCount = 0;
+    _pollingAuthenticated = false;
 
     const token = localStorage.getItem('cp_session_token');
     if (token) {
-      console.log('[Poll] Using existing session');
-      // Signal connected + auth restored.
-      emit('_connected');
-      emit('auth:success', { message: 'Session restored' });
-      // Fetch initial state (devices, clipboard, transfers) then start polling.
-      fetchInitialState(token).then(() => beginPollLoop());
+      console.log('[Poll] Using existing session — confirming with server...');
+      // Start polling immediately; fetchInitialState runs in parallel.
+      // Status is set to Connected only after the first successful poll response.
+      beginPollLoop();
+      fetchInitialState(token);
     } else {
       console.log('[Poll] No token — starting HTTP auth');
       pollAuth();
@@ -146,7 +149,7 @@ const WS = (() => {
 
   async function fetchInitialState(token) {
     try {
-      const resp = await fetch(`/api/init?token=${encodeURIComponent(token)}`);
+      const resp = await fetch(`/api/init?token=${encodeURIComponent(token)}`, { cache: 'no-cache' });
       if (!resp.ok) {
         if (resp.status === 401) {
           localStorage.removeItem('cp_session_token');
@@ -185,21 +188,47 @@ const WS = (() => {
     const token = localStorage.getItem('cp_session_token');
     if (!token) return;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     try {
-      const resp = await fetch(`/api/poll?token=${encodeURIComponent(token)}`);
+      const resp = await fetch(`/api/poll?token=${encodeURIComponent(token)}`, {
+        signal: controller.signal,
+        cache: 'no-cache',
+      });
+      clearTimeout(timeoutId);
+
       if (resp.status === 401) {
         console.warn('[Poll] Unauthorized — session expired');
         stopPolling();
+        _pollingAuthenticated = false;
         localStorage.removeItem('cp_session_token');
         emit('auth:revoked', { reason: 'expired' });
         return;
       }
+
+      const needsConfirm = !_pollingAuthenticated || pollingFailCount >= 3;
+      pollingFailCount = 0;
+      _pollingAuthenticated = true;
+
       const messages = await resp.json();
       for (const msg of messages) {
         emit(msg.event, msg.data);
       }
+
+      // Confirm connection: first successful poll OR recovery after failures.
+      if (needsConfirm) {
+        emit('_connected');
+        emit('auth:success', { message: 'Session restored' });
+        fetchInitialState(token);
+      }
     } catch (_) {
-      // Network hiccup — will retry next interval.
+      clearTimeout(timeoutId);
+      pollingFailCount++;
+      if (pollingFailCount === 3) {
+        _pollingAuthenticated = false;
+        emit('_disconnected');
+      }
     }
   }
 
@@ -208,6 +237,7 @@ const WS = (() => {
       clearInterval(pollInterval);
       pollInterval = null;
     }
+    _pollingAuthenticated = false;
     usePolling = false;
   }
 
@@ -253,6 +283,7 @@ const WS = (() => {
   /// Called after fresh poll auth to start the poll loop + fetch initial data.
   function onPollAuthenticated() {
     if (!usePolling) return;
+    _pollingAuthenticated = true;
     const token = localStorage.getItem('cp_session_token');
     if (token) {
       fetchInitialState(token).then(() => beginPollLoop());

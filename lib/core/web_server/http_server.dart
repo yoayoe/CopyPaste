@@ -133,6 +133,11 @@ class EmbeddedWebServer {
     request.response.headers
         .add('Access-Control-Allow-Headers', 'Content-Type');
 
+    // Prevent Safari/iOS from caching API responses (aggressive GET caching).
+    request.response.headers.add('Cache-Control', 'no-cache, no-store, must-revalidate');
+    request.response.headers.add('Pragma', 'no-cache');
+    request.response.headers.add('Expires', '0');
+
     if (request.method == 'OPTIONS') {
       request.response.statusCode = 200;
       await request.response.close();

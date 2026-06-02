@@ -22,11 +22,7 @@ const App = (() => {
       }
     });
     WS.on('_disconnected', () => {
-      // Only show disconnected if we're not about to switch to polling.
-      // Don't clear clipboard/transfer data — keep it visible during reconnect.
-      if (!WS.isPolling()) {
-        UI.setConnectionStatus(false);
-      }
+      UI.setConnectionStatus(false);
     });
 
     // Auth events.

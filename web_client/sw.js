@@ -1,10 +1,10 @@
 // Minimal service worker — enables PWA installability.
-// Uses network-first: always fetch live data, no offline caching
-// (app requires local network connection to the desktop).
+// JS files are NOT cached: they change frequently and the app requires a live
+// connection to the desktop anyway, so stale JS would only cause bugs.
 
-const CACHE = 'copypaste-v1';
-const STATIC = ['/', '/css/style.css', '/js/app.js', '/js/auth.js',
-  '/js/clipboard.js', '/js/transfer.js', '/js/ui.js', '/js/websocket.js'];
+const CACHE = 'copypaste-v3';
+// Only cache the shell (HTML + CSS). JS always fetched live from desktop.
+const STATIC = ['/', '/css/style.css'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -21,7 +21,15 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Always go to network; fall back to cache for static assets only.
+  const url = new URL(e.request.url);
+
+  // Never intercept API or WebSocket upgrade requests.
+  if (url.pathname.startsWith('/api/') || url.pathname === '/ws') return;
+
+  // JS files: always go straight to network (no SW interception).
+  if (url.pathname.startsWith('/js/')) return;
+
+  // HTML + CSS: network-first, fall back to cache for offline shell.
   e.respondWith(
     fetch(e.request).catch(() => caches.match(e.request))
   );
